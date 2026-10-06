@@ -1,0 +1,282 @@
+Historical engineering notes for NN6 Power Plan 2.3.5 and earlier.
+Current product: Game Power Plan Switcher 2.3.6. Use README.md and RELEASE-VERIFICATION.txt for current commands and checks. Version-specific claims below remain historical.
+
+Current release: 2.3.5 (2026-10-06). See IMPLEMENTATION.txt for topology, pending command receipts, compact footer, settings and specification corrections. RELEASE-VERIFICATION.txt records the current evidence; older version-specific notes and benchmarks below remain historical.
+
+NN6 POWER PLAN NATIVE 2.3.5 — ADAPTIVE PRO INTERFACE
+
+This guide describes the implemented UI and controller contract. It is not a
+verification report. Consult the release verification report for measured test
+results. Historical review builds are not part of this release.
+
+WINDOW, THEME AND DENSITY
+
+Expanded is 800 × 600 logical pixels. Compact is 584 × 526 and is the default
+for a new or missing preference file. The title-bar
+Compact/Expand button changes the saved size preset. A saved Expanded choice
+stays Expanded after upgrading; startup does not reset it to Compact.
+Resizing below 720 logical
+pixels also selects the compact presentation. Content uses 8px outer margins,
+6px gaps, 10px card padding, and 28px actions/inputs. The chart is 60px high in
+Expanded and 24px in Compact. Windows DPI scaling applies to these logical sizes.
+
+Use the moon button to change light/dark appearance manually. That turns off
+Follow Windows theme. Settings → Window & keys → Follow Windows theme uses the
+Windows application color preference. Both themes cover controls, cards, fields,
+dialogs and scrollbars. The light palette has a #F5F5F7 canvas, white surfaces
+and #1D1D1F primary text. Body text is 11px; secondary text is at least 10px.
+Measured numeric values use a monospaced Windows font and fixed chip geometry.
+
+Settings → Window & keys → Native window frame replaces the custom red/yellow
+capsule with the OS title bar and its native system menu/window controls. Native
+Snap behavior remains controlled by Windows. The custom frame retains the
+compact/expanded preset, drag area and lower-right resize target. Reduce interface
+motion uses immediate transitions. The simulated glass does not blur other apps.
+
+Repeated launches restore the existing GUI for the same user and Windows
+session. A same-user mutex and bounded SHOW pipe run before Slint initialization;
+they do not start another renderer/engine simply to discover an existing window.
+An early SHOW is retained through startup and overrides only the pending initial
+minimize action, without changing the saved Start minimized preference. A crash
+releases/abandons the kernel ownership for the next launch. Older NN6 builds
+without this protocol can still require an explicit migration/handover.
+Version 2.3.3 also requests a silent tray notice for the duplicate launch, only
+when the original GUI already has a registered tray icon. At most one notice is
+attempted per five seconds. Windows can suppress it; restoring the GUI does not
+depend on a balloon appearing. Requests discarded by Windows are not replayed.
+
+The renderer remains Slint FemtoVG over OpenGL, introduced in version 2.3.2.
+An OpenGL-capable driver is required. This implementation change does not claim
+a fixed memory reduction or performance result on every GPU. A hidden/minimized
+main window retains incoming engine state and defers visible model/chart/layout
+updates until shown again. Power monitoring, recovery and tray state continue.
+An enabled HUD still requests the telemetry it displays; disabling it drops its
+window/component resources instead of retaining a hidden graphics context.
+The main surface can remain cached by Slint/the driver. The previous release's
+RAM/CPU comparison is historical 2.3.2 evidence, not a measurement of this revision.
+
+LIVE OVERVIEW
+
+Current Plan shows the actual active plan name and process-monitor state. Start
+monitoring / Pause controls the existing engine. Startup controls the per-user
+native startup entry. When an older monitor owns the shared lock, use the explicit
+handover button before taking control; the UI does not silently disable it.
+
+The CPU chart contains measured Windows CPU busy-time samples over the trailing
+30 seconds. Emerald and cyan distinguish P/E series; the neutral series is the
+valid-core mean. Amber markers identify recorded plan changes. Hover the chart
+for the sample timestamp, total CPU measurement and associated plan information.
+Missing sample intervals remain gaps. Hover a core for its physical/logical
+identity and measurement detail. A measured 0% is valid; unavailable is —.
+These are sampled Windows utilization values, not instantaneous scheduler traces
+or a claim about which process owns a core.
+
+Topology is read once from GetLogicalProcessorInformationEx at GUI startup;
+vendor and model use supported CPUID identity leaves. Counts distinguish physical
+cores from their logical threads. Live PDH values map by Windows processor group
+and group-local logical index, so SMT siblings and repeated indices are not mixed.
+Click the info button beside Live CPU to inspect the model and detection summary.
+
+For Intel with distinct efficiency classes, sections read P-CORES (emerald) and
+E-CORES (cyan). Higher class denotes the performance tier relative to other
+reported classes. Homogeneous classes remain neutral C, even when zero; a zero
+class alone is not evidence of an E-core. LP E-core identity is not inferred.
+
+For AMD with valid cache relationships, sections read L3 GROUP 0, L3 GROUP 1, etc.
+Each reports the cores/threads sharing that particular L3 and its own size.
+Different sizes are reported as asymmetric L3, with the larger cache identified.
+Windows L3 sharing masks are not conclusive CCD/CCX IDs or proof of 3D V-Cache:
+for example, a Zen 2 CCD can contain separate CCX cache domains. No model-name or
+cache-size guess is substituted for reported topology. Unknown mappings keep a
+neutral logical-processor section. CPU years/models are not a test certification.
+
+The grid button toggles labeled chips and micro-heatmap. Labeled chips are 18px
+high with 4px gaps; all processors remain available in one scrollable viewport.
+Compact heatmap has 8 columns and Expanded has 16. Each topology section retains
+its heading, and groups exceeding the viewport scroll. Heatmap cells retain hover
+descriptions. No fixed simultaneously visible chip count is implied by grouping.
+
+The Gaming/Default counters summarize this GUI session's observed active-plan
+time. Unknown plans/disconnected periods are excluded. They are not game runtime
+or lifetime usage. Estimated power savings remains unavailable without a real
+energy meter and comparison baseline. The details button offers CSV/JSON export.
+
+The horizontal timeline opens actual event details. The expanded timeline has a
+scrollable newest-first history instead of a six-event limit. Select an event to
+inspect source/target plans, cause, available process/PID, recorded Windows user
+and measured power API duration. Legacy records without metadata say that it was
+not captured. API duration is not total process-detection latency. Diagnostic JSON
+includes selected event details, current error/status, detector and automation
+state, the active plan, observed session/history, and the last 64 KiB of native.log.
+Missing or truncated logs are labeled explicitly; failures outside the retained
+tail are not included. Reading/exporting runs in a background worker. The file can
+contain account, process and plan names; review it before sharing. Ordinary JSON
+and CSV also include current status/error, so failures are not presented as
+successful transition records.
+
+GAME WORKSPACE
+
+Search filters saved game profiles. Browse imports executable metadata; it does
+not launch the executable. Bulk add accepts executable names separated by commas.
+Running opens a read-only Windows process snapshot with searchable candidates.
+For Foreground app, bring the game to the front, then return to NN6. The picker
+uses the last external foreground application observed by NN6, not NN6 itself.
+If none was captured, use Running. Review the name
+before adding; a launcher may have a different executable than the actual game.
+
+Discover scans supported installed-library metadata, including Steam, Epic and
+accessible Xbox game locations. Auto-discover is opt-in. It refreshes reviewed
+candidates and does not add every discovered executable to the watched list.
+Protected/inaccessible installations can still require Browse or a process name.
+
+Select a saved profile → Profile settings. Choose an optional power-plan override,
+priority and affinity, then Save profile. Use global Gaming plan clears the
+override. Blank affinity retains normal scheduling. Supported named policies
+include performance, efficiency, physical and performance-physical; the physical
+policies select one logical thread per physical core in a single processor group.
+This is process affinity, not a BIOS-level change to SMT/Hyper-Threading. Original
+scheduling is restored by the engine when monitoring stops. Windows or protected
+games can deny scheduling changes; errors appear in the GUI and log.
+
+AUTOMATION
+
+Default behavior remains: any matching watched process can select Gaming.
+Settings → Automation → Require a foreground game is optional and off by default.
+When enabled, the engine also considers the foreground window. The use of Windows
+events does not imply zero overhead, instant switching, or anti-cheat approval.
+
+Switch to Default on Battery enables the DC-power guard using the configured
+Default plan. AC power allows the normal game policy to resume. With this guard
+enabled, an unknown power source also selects Default; it is not treated as AC.
+When battery or time rules are active, a failed policy application is retried on
+the next five-second policy tick, even if the observed source/time has not changed.
+A successful application clears that retry. With both rules disabled, ordinary
+event-driven switching is reevaluated by the next relevant event or user action.
+
+Auto-apply process tuning is the master switch for saved per-game affinity and
+priority policies.
+Edit game profiles opens Workspace; there is no unused global affinity text box.
+Trigger by Time of Day uses local HH:MM start/end values, including overnight
+windows. The time window gates automatic game eligibility; it does not invent a
+running game. Apply rule saves edited times. In-progress typing is isolated from fresh
+engine snapshots so a live update cannot reset a half-typed time. Validation
+failures are shown as status text.
+Settings edits and imported profiles use the same transaction: preflight installed
+plans, restore earlier changes, save, then restart if monitoring was active. A
+pending restoration blocks the new settings. Save or synchronous restart failure
+uses the previous configuration's rollback path.
+
+POWER-PLAN TOOLS
+
+Settings → Power contains searchable Gaming and Default plan selectors. The
+adjacent icons export .pow, duplicate the selected plan, or open Windows advanced
+power settings. Import .pow opens a native file picker and refreshes the plan list.
+These are explicit plan-management actions; normal monitoring only activates an
+existing target plan after checking the current active plan.
+
+If Windows denies a plan-file operation for lack of privilege, Power settings
+can show Retry with Windows approval. Clicking it retries the retained exact
+operation through the Windows approval prompt. Monitoring stays unelevated; no
+automatic elevation occurs. Elevated retry verification is recorded separately.
+
+Best performance overlay is the existing Windows power-mode overlay. Desktop
+telemetry HUD is a separate optional visible window. Overlay settings chooses its
+corner, opacity and shortcut. Apply overlay saves those controls. The HUD uses real
+available values and — for unavailable readings; it does not inject into a game.
+
+TRAY AND GLOBAL SHORTCUTS
+
+Settings → Window & keys → Close to system tray hides the main window while the
+engine remains available. Start minimized launches to the tray when supported.
+The tray menu and the in-app Tray controls provide Gaming/Default selection,
+Pause/Resume monitoring, show the window, and Exit. Exit restores Default and
+changed scheduling according to the engine's normal shutdown/recovery policy.
+Pause/Resume is labeled from the current monitoring state.
+
+The plan hotkey defaults to Ctrl + Alt + P. Apply registers it with Windows and
+shows the actual success/conflict result below the field. A blank shortcut disables
+that registration. The plan shortcut toggles the configured Gaming/Default plans;
+it is separate from Ctrl + Enter inside NN6, which toggles monitoring. Manual plan
+selection lasts until pause/resume or the next game start/exit, and the battery
+guard still takes precedence. The HUD shortcut is
+configured separately in Overlay settings; plan/HUD shortcuts must differ.
+
+SENSORS AND INTEGRATIONS
+
+Settings → Integrations shows actual provider diagnostics. GPU readings first use
+an installed NVIDIA NVML driver, or supported AMD ADL Overdrive8 PMLog hardware.
+The persistent worker samples nominally every two seconds while the main window
+or HUD is visible. Native driver DLLs are loaded from the Windows system directory
+using restricted dependency search. NN6 does not install a hardware driver or
+silently download a sensor service. Unsupported devices/driver calls remain —.
+
+The selected GPU is named. Temperature, utilization, fan percent and fan RPM are
+individual optional measurements; RPM is not calculated from percent. NVML fan
+values describe intended speed, not a blocked-fan diagnostic. A partially
+supported direct GPU is never filled using another adapter's fallback readings.
+If every direct reading fails, an existing WMI GPU may supply a complete fallback.
+
+CPU temperature, package power and other fallback sensors still require an
+existing LibreHardwareMonitor/OpenHardwareMonitor WMI provider. That separate
+background worker is requested at most every ten seconds, except explicit Retry.
+It cannot block direct GPU polling. Connect sensors / Retry remains usable when
+measurements are unavailable. NN6 assumes no general LHM shared-memory ABI and
+does not use sysinfo as a GPU sensor API. Missing sensors do not prevent process
+detection and power switching.
+
+Optional provider setup: obtain the Windows application from the upstream project
+https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/releases, extract it,
+and run LibreHardwareMonitor.exe. Keep the provider running while using sensors
+in NN6; if its build offers a WMI setting, enable that provider option. Confirm it
+can display the desired readings, then use NN6 Settings → Integrations → Retry.
+Some sensors require the provider itself to run with administrator privileges;
+NN6 remains an ordinary-user app. Upstream hardware and privilege documentation:
+https://github.com/LibreHardwareMonitor/LibreHardwareMonitor#readme
+
+Provider values appear only when their individual calls return usable readings.
+WMI poll/receipt age does not guarantee hardware acquisition freshness: the WMI
+schema exposes no acquisition timestamps and its values may be externally cached.
+An unchanged value proves neither freshness nor staleness. Locally expired WMI
+cache values are cleared; hiding both views invalidates the fallback cache and
+stops regular polling. Resuming requests fresh observations. No temperature,
+wattage or energy-saving estimate is invented. These are nominal polling
+intervals, not real-time deadlines; slow/unsupported provider status is explicit.
+
+FILES AND SOURCE
+
+Current portable release: outputs\NN6-PowerPlan-2.3.5.exe
+Main UI: outputs\native\ui\app.slint
+Controller: outputs\native\src\ui.rs and ui_pro.rs
+GUI singleton: outputs\native\src\gui_instance.rs
+CPU identity/topology: outputs\native\src\cpu_topology.rs
+Sensor worker: outputs\native\src\sensors.rs
+Vector branding: outputs\native\assets\icon.svg
+Build and recovery details: outputs\native\README.txt and Build.ps1
+
+Per-user engine policy: %LOCALAPPDATA%\NN6PowerPlan\native-settings.json
+Appearance/tray/hotkey preferences: %LOCALAPPDATA%\NN6PowerPlan\appearance.json
+Activity/errors: %LOCALAPPDATA%\NN6PowerPlan\native.log
+Pending restoration: %LOCALAPPDATA%\NN6PowerPlan\recovery.json
+Stable startup copy: %LOCALAPPDATA%\NN6PowerPlan\NativeApp\
+Timestamped plan switches: %LOCALAPPDATA%\GamePowerPlan\switch.log
+CSV/JSON/diagnostic exports use the location chosen in the native Save dialog.
+
+Read-only topology diagnostic (no GUI/engine or power/startup mutation):
+    .\NN6-PowerPlan-2.3.5.exe --topology-probe C:\Path\NN6-topology.json
+Supply a writable absolute report path. The report contains model/vendor,
+physical/logical counts, processor-group mappings, reported efficiency classes,
+L3 domains/sizes, and explicit detection status. A missing topology is not a set
+of fabricated zero-utilization values. Detection uses kernel32 plus Rust's
+standard CPUID intrinsic; no extra topology crate is required. The installed
+NVML integration remains pinned to nvml-wrapper 0.13.0.
+
+The footer is a gradient profile pill with 8px padding, a bordered circular avatar,
+bold nn6 and a separate muted Developer label. Hover adds a restrained emerald
+glow; keyboard focus remains visible. The dialog uses a 20px display name, 11px
+username and 10px subtitle, separated from badges by 12px space and a thin divider.
+Badges have 4px vertical/10px horizontal padding, with 8px gaps; narrow layouts
+stack them with 6px gaps using supported Slint conditional layouts.
+The footer opens the embedded nn6 developer profile. Discord uses the verified
+direct link and HTTPS fallback; no numeric ID entry is required. Profile data is a
+public snapshot, not live Discord synchronization. About retains AboutSlint and
+the dependency licenses. Prior review copies are retained until manual review.

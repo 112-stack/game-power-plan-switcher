@@ -1,0 +1,973 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 NN6. See LICENSE.txt and NOTICE.txt.
+// Game Power Plan Switcher 2.3.6 / adaptive Obsidian Glass. Native utility with real dark/light themes.
+// Fixed-height controls prevent accidental layout expansion. I/O stays in Rust.
+import { AboutSlint, Palette, Slider, ScrollView } from "std-widgets.slint";
+export struct GameRow { id: string, name: string, processes: string, icon: image, selected: bool }
+export struct CoreRow { label: string, fill: color, activity: float, detail: string, class: string }
+export struct CoreSection { title: string, detail: string, class: string, start: int, count: int, rows-8: int, rows-12: int, rows-16: int }
+export struct HistoryRow { label: string, detail: string, level: float, gaming: bool }
+export global Shortcuts { callback monitor; }
+export global Theme {
+ in-out property <bool> dark: true;
+ in-out property <string> ui-font: "Segoe UI";
+ in-out property <string> mono-font: "Consolas";
+ out property <color> canvas: root.dark ? #0B0D12 : #F5F5F7;
+ out property <color> surface: root.dark ? #12151E : #FFFFFF;
+ out property <color> elevated: root.dark ? #1A1F2C : #E9EBEF;
+ out property <color> border: root.dark ? #2A3042 : #D9DCE3;
+ out property <color> text: root.dark ? #FFFFFF : #1D1D1F;
+ out property <color> muted: root.dark ? #A0A5B0 : #626873;
+ out property <color> emerald: #10A37F;
+ out property <color> signal: root.dark ? #00FF9D : #007B58;
+ out property <color> cyan: root.dark ? #00E5FF : #007F96;
+ out property <color> warning: root.dark ? #FFB800 : #916400;
+ out property <color> danger: root.dark ? #FF928C : #B52F2A;
+ out property <color> highlight: root.dark ? #FFFFFF16 : #FFFFFFBB;
+ out property <color> shade: root.dark ? #00000099 : #15223817;
+ in-out property <bool> motion: true; in-out property <bool> modal-open: false;
+}
+export component FullscreenProbe inherits Window {
+ title: "Game Power Plan Switcher disposable fullscreen probe"; full-screen: true; background: #12151E;
+ Text { text: "Game Power Plan Switcher full-screen rendering test\nThis disposable window closes automatically."; color: white; horizontal-alignment: center; vertical-alignment: center; font-size: 24px; }
+}
+// Rust supplies live text and controls topmost/click-through placement natively.
+export component TelemetryHud inherits Window {
+ title: "Game Power Plan Switcher telemetry"; no-frame: true; background: transparent;
+ preferred-width: 220px; preferred-height: 72px;
+ in property <string> plan-name; in property <string> cpu-text; in property <string> sensor-text;
+ in property <float> alpha: 0.75;
+ Rectangle { border-radius: 12px; background: #161D25.with-alpha(clamp(root.alpha, 0.05, 1)); border-width: 1px; border-color: #FFFFFF24;
+  VerticalLayout { padding: 10px; spacing: 3px;
+   Text { text: root.plan-name; font-family: Theme.ui-font; color: #74EBC5; font-size: 11px; overflow: elide; }
+   Text { text: root.cpu-text; font-family: Theme.mono-font; color: white; font-size: 11px; overflow: elide; }
+   Text { text: root.sensor-text; font-family: Theme.mono-font; color: #BCC4D0; font-size: 10px; overflow: elide; }
+  }
+ }
+}
+component Label inherits Text { color: Theme.text; font-family: Theme.ui-font; font-size: 11px; font-weight: 400; vertical-alignment: center; min-width: 0px; overflow: elide; }
+component Muted inherits Label { color: Theme.muted; font-size: 10px; font-weight: 500; letter-spacing: 0.2px; }
+component NumberLabel inherits Label { font-family: Theme.mono-font; }
+component Heading inherits Label { font-size: 18px; font-weight: 500; letter-spacing: -0.5px; }
+component Eyebrow inherits Muted { letter-spacing: 1px; font-weight: 600; }
+component Icon inherits Path {
+ in property <string> kind; width: 16px; height: 16px; viewbox-width: 24; viewbox-height: 24;
+ stroke: Theme.muted; stroke-width: 1.7px; fill: transparent;
+ commands: root.kind == "close" ? "M 6 6 L 18 18 M 18 6 L 6 18"
+ : root.kind == "minimize" ? "M 5 12 L 19 12"
+ : root.kind == "info" ? "M 12 3 A 9 9 0 1 1 12 21 A 9 9 0 1 1 12 3 M 12 10 L 12 17 M 12 6 L 12 7"
+ : root.kind == "maximize" ? "M 6 6 L 18 6 L 18 18 L 6 18 Z"
+ : root.kind == "theme" ? "M 16 3 A 9 9 0 1 0 21 16 A 8 8 0 0 1 16 3 Z"
+ : root.kind == "heatmap" ? "M 4 4 L 9 4 L 9 9 L 4 9 Z M 15 4 L 20 4 L 20 9 L 15 9 Z M 4 15 L 9 15 L 9 20 L 4 20 Z M 15 15 L 20 15 L 20 20 L 15 20 Z"
+ : root.kind == "play" ? "M 7 4 L 20 12 L 7 20 Z"
+ : root.kind == "pause" ? "M 8 5 L 8 19 M 16 5 L 16 19"
+ : root.kind == "plus" ? "M 12 5 L 12 19 M 5 12 L 19 12"
+ : root.kind == "check" ? "M 5 12 L 10 17 L 20 6"
+ : root.kind == "left" ? "M 15 5 L 8 12 L 15 19"
+ : root.kind == "right" ? "M 9 5 L 16 12 L 9 19"
+ : root.kind == "refresh" ? "M 20 10 A 8 8 0 1 0 19 17 M 20 4 L 20 10 L 14 10"
+ : root.kind == "search" ? "M 10 3 A 7 7 0 1 0 10 17 A 7 7 0 1 0 10 3 M 15 15 L 21 21"
+ : root.kind == "overview" ? "M 3 4 L 21 4 L 21 20 L 3 20 Z M 3 10 L 21 10 M 10 10 L 10 20"
+ : root.kind == "grid" ? "M 3 3 L 9 3 L 9 9 L 3 9 Z M 15 3 L 21 3 L 21 9 L 15 9 Z M 3 15 L 9 15 L 9 21 L 3 21 Z M 15 15 L 21 15 L 21 21 L 15 21 Z"
+ : root.kind == "settings" ? "M 4 6 L 20 6 M 4 12 L 20 12 M 4 18 L 20 18 M 8 3 L 8 9 M 16 9 L 16 15 M 10 15 L 10 21"
+ : root.kind == "shield" ? "M 12 2 L 20 5 L 19 14 Q 17 19 12 22 Q 7 19 5 14 L 4 5 Z M 8 12 L 11 15 L 16 9"
+ : root.kind == "export" ? "M 12 3 L 12 15 M 7 10 L 12 15 L 17 10 M 4 16 L 4 21 L 20 21 L 20 16"
+ : root.kind == "external" ? "M 13 3 L 21 3 L 21 11 M 21 3 L 10 14 M 10 5 L 4 5 L 4 21 L 19 21 L 19 15"
+ : root.kind == "chevron" ? "M 6 9 L 12 15 L 18 9"
+ : "M 8 3 L 20 3 L 20 16 L 8 16 Z M 4 8 L 4 21 L 15 21";
+}
+// Layout sizes stay fixed; only the visual surface scales on hover/press.
+// Frosting and inset shadows are layered gradients, not an OS backdrop blur.
+component Action inherits Rectangle {
+ in property <string> text; in property <string> icon; in property <bool> enabled: true;
+ in property <bool> in-dialog: false; in property <bool> accent: false; in property <bool> danger: false; in property <bool> ghost: false;
+ in property <bool> selected: false; in property <bool> expand: false; in property <bool> align-left: false;
+ in property <length> control-height: 28px;
+ out property <bool> hovered: touch.has-hover; out property <bool> focused: focus.has-focus;
+ callback clicked; callback activated; activated => { root.clicked(); }
+ height: root.control-height;
+ min-width: root.expand ? 0px : max(root.control-height, caption.preferred-width + (root.icon == "" ? 16px : 36px));
+ preferred-width: self.min-width; max-width: root.expand ? 100000px : self.min-width; horizontal-stretch: root.expand ? 1 : 0; vertical-stretch: 0;
+ border-radius: self.height / 2; border-width: 1px; border-color: root.accent ? #A8FFE144 : root.ghost && !root.hovered && !root.selected ? transparent : Theme.border;
+ private property <brush> resting: root.accent ? @linear-gradient(180deg, #20B88A, #10A37F) : root.selected ? @linear-gradient(180deg, Theme.elevated.brighter(0.05), Theme.elevated) : root.ghost ? Theme.text.with-alpha(0.025) : @linear-gradient(180deg, Theme.elevated, Theme.surface);
+ background: root.hovered ? root.resting.brighter(0.1) : root.resting;
+ opacity: root.enabled ? 1 : 0.55;
+ transform-scale: touch.pressed ? 0.975 : root.hovered && Theme.motion ? 1.02 : 1;
+ drop-shadow-color: root.focused ? Theme.cyan.with-alpha(0.34) : root.accent ? #10A37F66 : #00000044;
+ drop-shadow-blur: root.focused ? 9px : root.hovered ? 7px : 4px; drop-shadow-offset-y: root.focused ? 0px : 2px;
+ animate background, border-color, transform-scale, drop-shadow-color, drop-shadow-blur, drop-shadow-offset-y { duration: Theme.motion ? 130ms : 0ms; easing: ease-out; }
+ Rectangle { x: 12px; y: 1px; width: parent.width - 24px; height: 1px; background: @linear-gradient(90deg, #FFFFFF00, #FFFFFF20, #FFFFFF00); }
+ Rectangle { x: 12px; y: parent.height - 2px; width: parent.width - 24px; height: 1px; background: @linear-gradient(90deg, #00000000, #00000038, #00000000); }
+ forward-focus: focus;
+ accessible-role: button; accessible-label: root.text; accessible-enabled: root.enabled && (!Theme.modal-open || root.in-dialog);
+ accessible-action-default => { if root.enabled && (!Theme.modal-open || root.in-dialog) { root.clicked(); } }
+ HorizontalLayout {
+  padding-left: 8px; padding-right: 8px; spacing: 4px; alignment: root.align-left ? start : center;
+  if root.icon != "" && !(root.align-left && root.icon == "chevron"): Rectangle { width: 16px; Icon { y: (parent.height - self.height) / 2; kind: root.icon; stroke: root.danger ? Theme.danger : root.accent ? #082C23 : Theme.text; } }
+  caption := Label { text: root.text; horizontal-stretch: root.expand ? 1 : 0; horizontal-alignment: root.align-left ? left : center; color: root.danger ? Theme.danger : root.accent ? #082C23 : Theme.text; font-size: 11px; font-weight: root.accent ? 600 : 400; }
+  if root.align-left && root.icon == "chevron": Rectangle { width: 16px; Icon { y: (parent.height - 16px) / 2; kind: "chevron"; } }
+ }
+ focus := FocusScope { enabled: root.enabled && (!Theme.modal-open || root.in-dialog); key-pressed(e) => {
+  if e.modifiers.control && e.text == "\n" && !Theme.modal-open { Shortcuts.monitor(); return accept; }
+  if e.text == "\n" || e.text == " " { root.activated(); return accept; } return reject;
+ } }
+ touch := TouchArea { enabled: root.enabled && (!Theme.modal-open || root.in-dialog); mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+component GhostIcon inherits Rectangle {
+ out property <bool> hovered: touch.has-hover;
+ in property <string> icon; in property <string> label; in property <bool> enabled: true; in property <bool> in-dialog: false; callback clicked;
+ width: 24px; height: 24px; vertical-stretch: 0; horizontal-stretch: 0; border-radius: self.height / 2;
+ background: touch.has-hover ? Theme.elevated : transparent;
+ border-width: 1px; border-color: touch.has-hover ? Theme.border : transparent;
+ transform-scale: touch.pressed ? 0.975 : touch.has-hover && Theme.motion ? 1.02 : 1;
+ drop-shadow-color: focus.has-focus ? Theme.cyan.with-alpha(0.4) : transparent; drop-shadow-blur: 8px;
+ opacity: root.enabled ? 1 : 0.3;
+ animate background, border-color, transform-scale, drop-shadow-color { duration: Theme.motion ? 130ms : 0ms; easing: ease-out; }
+ Rectangle { x: 8px; y: 1px; width: parent.width - 16px; height: 1px; background: touch.has-hover ? #FFFFFF20 : transparent; }
+ Icon { width: min(16px, parent.width - 4px); height: min(16px, parent.height - 4px); x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; kind: root.icon; stroke: touch.has-hover ? Theme.text : Theme.muted; }
+ forward-focus: focus; accessible-role: button; accessible-label: root.label; accessible-enabled: root.enabled && (!Theme.modal-open || root.in-dialog);
+ accessible-action-default => { if root.enabled && (!Theme.modal-open || root.in-dialog) { root.clicked(); } }
+ focus := FocusScope { enabled: root.enabled && (!Theme.modal-open || root.in-dialog); key-pressed(e) => { if e.text == " " || e.text == "\n" { root.clicked(); return accept; } return reject; } }
+ touch := TouchArea { enabled: root.enabled && (!Theme.modal-open || root.in-dialog); mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+component NavTab inherits Action {
+ ghost: true; min-width: 94px; max-width: 94px; preferred-width: 94px;
+ background: root.selected ? Theme.elevated : root.hovered ? Theme.text.with-alpha(0.04) : transparent;
+ border-color: root.selected ? Theme.border : transparent;
+ drop-shadow-color: root.focused ? Theme.cyan.with-alpha(0.35) : root.selected ? #00000040 : transparent;
+ Rectangle {
+  x: 16px; y: parent.height - 3px; width: parent.width - 32px; height: 2px;
+  border-radius: 1px; background: Theme.signal; opacity: root.selected ? 0.75 : 0;
+  drop-shadow-color: Theme.emerald.with-alpha(0.45); drop-shadow-blur: 6px;
+  animate opacity { duration: Theme.motion ? 130ms : 0ms; easing: ease-out; }
+ }
+}
+component Field inherits Rectangle {
+ in-out property <string> text; in property <string> placeholder; in property <bool> search: false;
+ in property <bool> invalid: false;
+ in property <bool> enabled: true; in property <bool> in-dialog: false; callback edited(string); callback accepted;
+ height: 28px; horizontal-stretch: 1; border-radius: self.height / 2;
+ background: @linear-gradient(180deg, Theme.canvas, Theme.surface); border-width: 1px; border-color: root.invalid ? Theme.danger.with-alpha(0.65) : Theme.border;
+ drop-shadow-color: root.invalid ? Theme.danger.with-alpha(0.16) : input.has-focus ? Theme.cyan.with-alpha(0.35) : transparent; drop-shadow-blur: 8px;
+ animate border-color, drop-shadow-color { duration: Theme.motion ? 130ms : 0ms; easing: ease-out; } forward-focus: input;
+ Rectangle { x: 12px; y: 1px; width: parent.width - 24px; height: 2px; background: @linear-gradient(180deg, #00000070, #00000000); }
+ Rectangle { x: 12px; y: parent.height - 2px; width: parent.width - 24px; height: 1px; background: #FFFFFF0F; }
+ if root.search: Icon { x: 8px; y: 6px; kind: "search"; }
+ Text { x: root.search ? 28px : 8px; height: parent.height; width: parent.width - self.x - 28px; text: input.text == "" ? root.placeholder : ""; color: Theme.muted; vertical-alignment: center; font-size: 11px; overflow: elide; }
+ input := TextInput { enabled: root.enabled && (!Theme.modal-open || root.in-dialog);
+  x: root.search ? 28px : 8px; height: parent.height; width: parent.width - self.x - 28px;
+  text <=> root.text; color: Theme.text; font-family: Theme.ui-font; font-size: 11px; single-line: true; vertical-alignment: center;
+  accessible-label: root.placeholder; edited => { root.edited(self.text); } accepted => { root.accepted(); }
+  key-pressed(e) => { if e.modifiers.control && e.text == "\n" && !Theme.modal-open { Shortcuts.monitor(); return accept; } return reject; }
+ }
+ if root.text != "" && root.enabled: GhostIcon { in-dialog: root.in-dialog; x: parent.width - 26px; y: 2px; icon: "close"; label: "Clear field"; clicked => { root.text = ""; root.edited(""); input.focus(); } }
+}
+component Light inherits Rectangle {
+ in property <color> tint; in property <string> kind; in property <string> label; callback clicked;
+ in property <bool> in-dialog: false;
+ width: 24px; height: 24px; horizontal-stretch: 0; vertical-stretch: 0;
+ accessible-role: button; accessible-label: root.label; accessible-enabled: !Theme.modal-open || root.in-dialog; accessible-action-default => { if !Theme.modal-open || root.in-dialog { root.clicked(); } } forward-focus: focus;
+ Rectangle {
+  width: 14px; height: 14px; x: 5px; y: 5px; border-radius: 7px; border-width: 1px; border-color: root.tint.darker(0.25);
+  transform-scale: touch.pressed ? 0.975 : touch.has-hover && Theme.motion ? 1.15 : 1;
+  opacity: touch.has-hover ? 1 : 0.92;
+  background: @radial-gradient(circle, root.tint.brighter(touch.has-hover ? 0.4 : 0.2) 0%, root.tint 55%, root.tint.darker(0.2) 100%);
+  drop-shadow-color: focus.has-focus ? Theme.cyan.with-alpha(0.5) : root.tint.with-alpha(touch.has-hover ? 0.8 : 0.18);
+  drop-shadow-blur: touch.has-hover || focus.has-focus ? 12px : 3px; drop-shadow-offset-y: 1px;
+  animate transform-scale, opacity, background, drop-shadow-blur, drop-shadow-color { duration: Theme.motion ? 140ms : 0ms; easing: ease-out; }
+  Rectangle { x: 3px; y: 2px; width: 8px; height: 4px; border-radius: 4px; background: @linear-gradient(180deg, #FFFFFF66, #FFFFFF00); }
+  Icon { kind: root.kind; width: 8px; height: 8px; x: 3px; y: 3px; stroke: #352519; stroke-width: 2px; }
+ }
+ focus := FocusScope { enabled: !Theme.modal-open || root.in-dialog; key-pressed(e) => { if e.text == " " || e.text == "\n" { root.clicked(); return accept; } return reject; } }
+ touch := TouchArea { enabled: !Theme.modal-open || root.in-dialog; mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+// Share the light styling while keeping window actions out of identity dialogs.
+// Header has minimize/close; identity dialogs expose only dismiss.
+component TrafficLights inherits Rectangle {
+ in property <bool> in-dialog: false;
+ in property <bool> show-minimize: true;
+ in property <string> minimize-label: "Minimize application";
+ in property <string> close-label: "Close application";
+ callback minimized; callback closed;
+ width: root.show-minimize ? 56px : 28px; height: 26px; horizontal-stretch: 0; vertical-stretch: 0;
+ border-radius: 13px; border-width: 1px; border-color: Theme.border;
+ background: @linear-gradient(180deg, Theme.highlight, Theme.text.with-alpha(0.04));
+ HorizontalLayout { padding: 1px; spacing: 2px; alignment: center;
+  if root.show-minimize: Light { in-dialog: root.in-dialog; tint: #FFB800; kind: "minimize"; label: root.minimize-label; clicked => { root.minimized(); } }
+  Light { in-dialog: root.in-dialog; tint: #FF3B30; kind: "close"; label: root.close-label; clicked => { root.closed(); } }
+ }
+}
+component Card inherits Rectangle {
+ background: @linear-gradient(160deg, Theme.surface.brighter(0.03), Theme.surface 55%, Theme.surface); border-radius: 12px; border-width: 1px; border-color: Theme.border;
+ drop-shadow-color: Theme.shade; drop-shadow-blur: 12px; drop-shadow-offset-y: 4px;
+ // Decorative inset uses radius 12 - 4 = 8; content padding is independent.
+ Rectangle { x: 4px; y: 4px; width: parent.width - 8px; height: parent.height - 8px; border-radius: 8px; border-width: 1px; border-color: #FFFFFF04; }
+ Rectangle { x: 12px; y: 1px; width: parent.width - 24px; height: 1px; background: @linear-gradient(90deg, #FFFFFF04, #FFFFFF24, #FFFFFF04); }
+ @children
+}
+component Badge inherits Rectangle {
+ // Profile metadata has a real 4px vertical / 10px horizontal inset.
+ in property <string> text; height: 24px; vertical-stretch: 0;
+ min-width: caption.preferred-width + 20px; preferred-width: self.min-width; max-width: self.min-width;
+ horizontal-stretch: 0; border-radius: 12px; background: Theme.canvas;
+ border-width: 1px; border-color: Theme.border.with-alpha(0.55);
+ caption := Muted { x: 10px; y: 4px; width: parent.width - 20px; height: parent.height - 8px; text: root.text; font-size: 10px; }
+}
+component ToggleRow inherits Card {
+ in property <bool> in-dialog: false; in property <string> text; in property <string> detail; in property <bool> checked; in property <bool> enabled: true;
+ callback clicked; height: 40px;
+ drop-shadow-color: focus.has-focus ? Theme.cyan.with-alpha(0.35) : Theme.shade;
+ background: touch.has-hover ? Theme.elevated : Theme.surface; opacity: root.enabled ? 1 : 0.55;
+ animate background, drop-shadow-color { duration: Theme.motion ? 130ms : 0ms; easing: ease-out; }
+ HorizontalLayout {
+  padding-left: 10px; padding-right: 10px; padding-top: 6px; padding-bottom: 6px; spacing: 8px;
+  VerticalLayout { spacing: 2px; Label { text: root.text; font-size: 11px; } Muted { text: root.detail; font-size: 10px; } }
+  Rectangle { width: 34px;
+   Rectangle { y: (parent.height - 18px) / 2; width: 34px; height: 18px; border-radius: 9px; border-width: 1px; border-color: #FFFFFF22;
+    background: root.checked ? @linear-gradient(180deg, #20B88A, #10A37F) : @linear-gradient(180deg, Theme.border, Theme.muted.with-alpha(0.5));
+    drop-shadow-color: root.checked ? #10A37F44 : #00000044; drop-shadow-blur: 4px;
+    animate background, drop-shadow-color { duration: Theme.motion ? 130ms : 0ms; easing: ease-out; }
+    Rectangle { x: root.checked ? 18px : 2px; y: 2px; width: 14px; height: 14px; border-radius: 7px; background: @linear-gradient(180deg, #FFFFFF, #E2E8EA); drop-shadow-color: #00000066; drop-shadow-blur: 3px; drop-shadow-offset-y: 1px; animate x { duration: Theme.motion ? 140ms : 0ms; easing: ease-out; } }
+   }
+  }
+ }
+ forward-focus: focus; accessible-role: checkbox; accessible-label: root.text; accessible-checked: root.checked; accessible-enabled: root.enabled && (!Theme.modal-open || root.in-dialog);
+ accessible-action-default => { if root.enabled && (!Theme.modal-open || root.in-dialog) { root.clicked(); } }
+ focus := FocusScope { enabled: root.enabled && (!Theme.modal-open || root.in-dialog); key-pressed(e) => { if e.text == " " || e.text == "\n" { root.clicked(); return accept; } return reject; } }
+ touch := TouchArea { enabled: root.enabled && (!Theme.modal-open || root.in-dialog); mouse-cursor: pointer; clicked => { focus.focus(); root.clicked(); } }
+}
+// Thermal values stay unavailable until a trusted sensor provider binds them.
+component MetricPill inherits Rectangle {
+ in property <string> label; in property <string> value; in property <color> tint: Theme.muted;
+ in property <string> detail; callback hover(bool);
+ height: 20px; border-radius: 10px; border-width: 1px; border-color: root.tint.with-alpha(0.18);
+ background: root.tint.with-alpha(0.06); horizontal-stretch: 1;
+ HorizontalLayout { padding-left: 6px; padding-right: 6px; spacing: 4px;
+  Muted { text: root.label; } NumberLabel { text: root.value; color: root.tint; font-size: 10px; horizontal-alignment: right; }
+ }
+ accessible-role: text; accessible-label: root.label + ": " + root.value + ". " + root.detail;
+ TouchArea { changed has-hover => { root.hover(self.has-hover); } }
+}
+component SectionTab inherits Action { expand: true; ghost: true; }
+export component AppWindow inherits Window {
+ init => { Theme.dark = root.dark-mode; Theme.ui-font = root.ui-font; Theme.mono-font = root.mono-font; Theme.motion = root.render-active && !root.reduced-motion && !root.suspended; Palette.color-scheme = root.dark-mode ? ColorScheme.dark : ColorScheme.light; }
+ title: "Game Power Plan Switcher"; icon: @image-url("../assets/icon.png");
+ preferred-width: root.compact-mode ? 584px : 800px; preferred-height: root.compact-mode ? 526px : 600px; min-width: 584px; min-height: 526px;
+ no-frame: !root.native-frame; background: Theme.canvas; default-font-family: root.ui-font;
+ in-out property <bool> compact-mode: true; in-out property <bool> dark-mode: true;
+ in-out property <bool> sync-system-theme: true; in-out property <bool> native-frame: false;
+ in-out property <bool> heatmap-view: false; in-out property <bool> auto-discover: false;
+ in-out property <bool> foreground-only: false;
+ in property <string> ui-font: "Segoe UI"; in property <string> mono-font: "Consolas";
+ in property <string> cpu-p-trend-path; in property <string> cpu-e-trend-path;
+ in property <string> graph-tooltip; in property <string> provider-status: "Checking Windows integrations…";
+ in property <string> candidate-source: "Installed game libraries";
+ in property <string> event-detail; in property <string> game-plan-name: "Use global Gaming plan";
+ in property <string> hotkey-status: "Shortcut not registered";
+ callback layout-mode(bool); callback graph-hover(float); callback event-selected(int);
+ private property <bool> compact-layout: root.compact-mode || root.width < 720px;
+ private property <int> cpu-columns: root.heatmap-view ? (root.compact-layout ? 8 : 16) : (root.compact-layout ? 8 : 12);
+ private property <length> cpu-step: root.heatmap-view ? (root.compact-layout ? 10px : 12px) : 22px;
+ // Group memberships are joined to samples by Windows processor group + index.
+ in property <string> cpu-vendor; in property <string> cpu-model;
+ in property <string> topology-summary: "Reading Windows topology…";
+ in property <string> topology-detail;
+ in property <int> p-core-count; in property <int> e-core-count;
+ in property <bool> is-hybrid: false; in property <bool> has-ccx: false;
+ in property <bool> has-l3-groups: false;
+ in property <int> topology-mode: 0;
+ // l3-groups maps logical rows to cache domains; its length is not a domain
+ // count. A single measured AMD cache domain must still render one section.
+ private property <bool> show-p-cores: root.topology-mode == 1 && root.is-hybrid && root.p-core-count > 0;
+ private property <bool> show-e-cores: root.topology-mode == 1 && root.is-hybrid && root.e-core-count > 0;
+ private property <bool> show-l3-groups: root.topology-mode == 2 && root.has-l3-groups;
+ private property <bool> show-standard: !root.show-p-cores && !root.show-e-cores && !root.show-l3-groups;
+ in property <[int]> ccx-groups; in property <[int]> l3-groups;
+ in property <[CoreSection]> core-sections;
+ in property <int> core-rows-8; in property <int> core-rows-12; in property <int> core-rows-16;
+ private property <int> total-core-rows: root.cpu-columns == 8 ? root.core-rows-8 : root.cpu-columns == 12 ? root.core-rows-12 : root.core-rows-16;
+ private property <int> hovered-event: -1;
+ changed dark-mode => { Theme.dark = root.dark-mode; Palette.color-scheme = root.dark-mode ? ColorScheme.dark : ColorScheme.light; }
+ changed ui-font => { Theme.ui-font = root.ui-font; }
+ changed mono-font => { Theme.mono-font = root.mono-font; }
+ // Public contract remains compatible with the existing Rust controller.
+ in-out property <int> page: 0; in-out property <int> modal: 0; in-out property <bool> details: false; in-out property <bool> dismissed: false;
+ in-out property <string> search-text; in-out property <string> bulk-text; in-out property <string> plan-search; in-out property <int> plan-kind: -1; in-out property <int> plan-index: 0;
+ in-out property <string> affinity-text; in-out property <int> priority-index: 0; in property <string> edit-name;
+ in property <[GameRow]> games; in property <[GameRow]> candidates; in property <[CoreRow]> cores; in property <[HistoryRow]> history; in property <[string]> plan-options;
+ in property <string> gaming-name; in property <string> default-name; in property <string> page-label: "1 / 1";
+ in property <bool> can-back: false; in property <bool> can-next: false; in property <bool> has-selection: false;
+ in property <string> candidate-page-label: "1 / 1"; in property <bool> candidate-back: false; in property <bool> candidate-next: false;
+ in property <string> plan-page-label: "1 / 1"; in property <bool> plan-back: false; in property <bool> plan-next: false;
+ in property <bool> monitoring: false; in property <bool> startup: false; in property <bool> error: false; in property <bool> legacy: false; in property <bool> observer: false; in property <bool> connected: false; in property <bool> running: false;
+ in property <bool> handover-pending: false; in property <bool> configuration-pending: false;
+ in property <bool> cpu-warming: false;
+ in property <bool> overlay: false; in property <bool> reduced-motion: false; in property <bool> suspended: false;
+ // Native visibility gates visual work independently from monitoring and the HUD.
+ in property <bool> render-active: false;
+ in property <string> state-label: "Connecting"; in property <string> active-name: "Reading Windows…"; in property <string> active-guid; in property <string> status: "Starting native engine…"; in property <string> telemetry: "Telemetry paused";
+ in property <string> validation: "Separate .exe names with commas. Paths are reduced to file names."; in property <bool> bulk-valid: false; in property <bool> bulk-error: false;
+ in property <string> selected-processes; in property <string> process-summary: "No watched games running"; in property <float> reveal: 1; in property <float> pulse: 0;
+ in-out property <int> core-page: 0;
+ private property <int> hovered-core: -1;
+ private property <int> core-pages: max(1, ceil(root.cores.length / 32));
+ changed cores => { root.core-page = min(root.core-page, root.core-pages - 1); }
+ in-out property <string> core-info; in property <string> backend: "Fast traces when permitted · compatibility checks every 1 second"; in property <string> timeline-path;
+ // Pro display bindings: populated only from measured engine data (src/pro_view.rs).
+ in property <string> cpu-trend-path; in property <string> cpu-switch-path;
+ in property <string> cpu-trend-label: "Waiting for CPU samples"; in property <bool> cpu-trend-available: false;
+ in property <string> session-gaming: "—"; in property <string> session-default: "—";
+ in property <float> session-gaming-ratio: 0; in property <string> session-donut-path;
+ in property <string> session-accounting-label: "Observed this app session";
+ in property <string> energy-savings: "Unavailable"; in property <bool> energy-savings-available: false;
+ in property <[bool]> games-running; in property <bool> process-status-available: false;
+ in property <string> detector-label: "Windows WMI / Win32 process detection";
+ // Providers set capabilities only when their real controller handlers are ready.
+ // Unsupported sensors retain -1 rather than substituting sample data.
+ in property <bool> sensors-available: false; in property <float> cpu-temp: -1;
+ in property <float> gpu-temp: -1; in property <float> cpu-package-watts: -1; in property <float> fan-rpm: -1;
+ in property <float> gpu-utilization: -1; in property <float> gpu-fan-percent: -1; in property <float> gpu-fan-rpm: -1;
+ in property <string> cpu-sensor-provider; in property <string> gpu-sensor-provider;
+ in property <string> power-sensor-provider; in property <string> fan-sensor-provider;
+ private property <string> hovered-sensor;
+ in property <bool> power-tools-available: false; in property <bool> tray-available: false;
+ in property <bool> elevated-plan-retry: false;
+ in property <bool> automation-available: false; in property <bool> visual-overlay-available: false;
+ in property <bool> hotkeys-available: false;
+ in-out property <bool> minimize-to-tray: false; in-out property <bool> start-minimized: false;
+ in-out property <bool> auto-switch-battery: false; in-out property <bool> auto-apply-affinity: false;
+ in-out property <bool> auto-time-rule: false; in-out property <string> automation-affinity: "performance";
+ in-out property <string> automation-start: "20:00"; in-out property <string> automation-end: "00:00";
+ // Preserve a half-typed time while fresh engine snapshots update saved values.
+ private property <string> time-start-draft: root.automation-start;
+ private property <string> time-end-draft: root.automation-end;
+ private property <bool> time-draft-dirty: false;
+ changed automation-start => { if !root.time-draft-dirty { root.time-start-draft = root.automation-start; } }
+ changed automation-end => { if !root.time-draft-dirty { root.time-end-draft = root.automation-end; } }
+ in-out property <string> global-hotkey: "Ctrl + Alt + P";
+ in-out property <bool> visual-overlay-enabled: false; in-out property <int> overlay-position: 0;
+ in-out property <float> overlay-opacity: 75; in-out property <string> overlay-hotkey: "Ctrl + Alt + O";
+ in-out property <int> settings-section: 0; in-out property <int> automation-expanded: -1;
+ callback power-tool(int, string); callback pro-setting(string); callback pro-command(string);
+ callback action(string); callback select-game(string); callback search(string); callback bulk-edit(string); callback plan-filter(string); callback choose-plan(int); callback add-candidate(string); callback navigate(int); callback window-action(int); callback view(bool);
+ changed page => { root.graph-hover(-1); root.view(root.page == 0); root.navigate(root.page); }
+ changed reduced-motion => { Theme.motion = root.render-active && !root.reduced-motion && !root.suspended; }
+ changed suspended => { Theme.motion = root.render-active && !root.reduced-motion && !root.suspended; }
+ changed render-active => { Theme.motion = root.render-active && !root.reduced-motion && !root.suspended; }
+ private property <bool> dialog-open: root.modal != 0 || root.plan-kind >= 0; changed dialog-open => { Theme.modal-open = root.dialog-open; if !root.dialog-open { main-keys.focus(); } }
+ callback close-dialog;
+ close-dialog => { root.modal = 0; root.plan-kind = -1; main-keys.focus(); }
+ keys := FocusScope {
+  capture-key-pressed(e) => {
+   if root.plan-kind >= 0 && root.plan-options.length > 0 {
+    if e.text == Key.DownArrow { root.plan-index = min(root.plan-index + 1, root.plan-options.length - 1); return accept; }
+    if e.text == Key.UpArrow { root.plan-index = max(0, root.plan-index - 1); return accept; }
+   } return reject;
+  }
+  key-pressed(e) => {
+   if e.text == Key.Escape { root.close-dialog(); return accept; }
+   if e.modifiers.control && e.text == "\n" && !root.dialog-open { root.action("toggle"); return accept; }
+   if root.plan-kind >= 0 && root.plan-options.length > 0 {
+    if e.text == Key.DownArrow { root.plan-index = min(root.plan-index + 1, root.plan-options.length - 1); return accept; }
+    if e.text == Key.UpArrow { root.plan-index = max(0, root.plan-index - 1); return accept; }
+    if e.text == "\n" { root.choose-plan(root.plan-index); return accept; }
+   } return reject;
+  }
+  main-keys := FocusScope {
+   enabled: !root.dialog-open;
+   Rectangle {
+    border-radius: 12px; background: Theme.canvas; border-width: 1px; border-color: Theme.border;
+    Rectangle { width: parent.width; height: 180px; border-radius: 12px; background: @radial-gradient(circle, #00E5FF09 0%, #00E5FF00 100%); }
+    Rectangle { x: parent.width / 2; y: parent.height - 160px; width: parent.width / 2; height: 160px; background: @radial-gradient(circle, #10A37F0B 0%, #10A37F00 100%); }
+    VerticalLayout {
+     spacing: 0; padding: 1px;
+     Rectangle {
+      height: 36px; background: @linear-gradient(180deg, Theme.surface, Theme.canvas); border-top-left-radius: 12px; border-top-right-radius: 12px;
+      if !root.native-frame: TouchArea { width: parent.width - 280px; pointer-event(e) => { if e.kind == PointerEventKind.down && e.button == PointerEventButton.left { root.window-action(3); } } }
+      HorizontalLayout {
+       padding-left: 8px; padding-right: 6px; padding-top: 5px; padding-bottom: 5px; spacing: 6px;
+       Image { source: @image-url("../assets/icon.png"); width: 26px; height: 26px; image-fit: contain; }
+       Label { text: "Game Power Plan Switcher"; font-weight: 600; }
+       // Keep the descriptive product title legible even at Compact width.
+       Rectangle { horizontal-stretch: 1; }
+       Action { text: root.compact-mode ? "Expand" : "Compact"; icon: "maximize"; control-height: 24px; ghost: true; clicked => { root.compact-mode = !root.compact-mode; root.layout-mode(root.compact-mode); } }
+       GhostIcon { icon: "theme"; label: root.dark-mode ? "Use light theme" : "Use dark theme"; clicked => { root.dark-mode = !root.dark-mode; root.sync-system-theme = false; root.pro-setting("theme"); } }
+       header-status := Action { text: root.handover-pending ? "Taking control…" : root.configuration-pending ? "Applying…" : root.error ? "Attention" : root.state-label; control-height: 24px; ghost: true;
+        background: root.error || root.handover-pending || root.configuration-pending ? Theme.warning.with-alpha(0.09) : root.monitoring ? Theme.signal.with-alpha(0.09) : Theme.text.with-alpha(0.035);
+        border-color: root.error || root.handover-pending || root.configuration-pending ? Theme.warning.with-alpha(0.35) : Theme.border; clicked => { root.modal = 9; }
+       }
+       shield := GhostIcon { icon: "shield"; label: "Windows process detection details"; clicked => { root.modal = 9; } }
+       if !root.native-frame: TrafficLights { minimized => { root.window-action(1); } closed => { root.window-action(0); } }
+      }
+     }
+     HorizontalLayout {
+      height: 32px; padding-left: 12px; padding-right: 8px; padding-top: 2px; padding-bottom: 2px; spacing: 6px;
+      for label[i] in ["Overview", "Workspace", "Settings"]: NavTab { text: label; icon: i == 0 ? "overview" : i == 1 ? "grid" : "settings"; selected: root.page == i; clicked => { root.page = i; } }
+      Rectangle { horizontal-stretch: 1; } Eyebrow { text: root.page == 0 ? "LIVE INSIGHTS" : root.page == 1 ? "GAME PROFILES" : "UTILITY CONTROLS"; horizontal-alignment: right; }
+     }
+     if (root.legacy || root.observer) && root.page == 0 && !root.dismissed && !root.handover-pending: Rectangle {
+      height: 32px;
+      Card { x: 12px; width: parent.width - 24px; height: 32px; background: #FFB8000C; border-color: #FFB80033; drop-shadow-blur: 8px; drop-shadow-color: #FFB80012;
+       HorizontalLayout {
+        padding-left: 10px; padding-right: 4px; padding-top: 2px; padding-bottom: 2px; spacing: 6px;
+        Label { text: root.observer ? "Another app window has control." : "Your previous monitor is running."; color: Theme.warning; font-size: 11px; }
+        Action { text: root.observer ? "Take control" : "Use this app instead"; control-height: 28px; ghost: true; clicked => { root.action(root.observer ? "claim" : "handover"); } }
+        Rectangle { width: 24px; GhostIcon { y: (parent.height - 24px) / 2; icon: "close"; label: "Dismiss notice"; clicked => { root.dismissed = true; } } }
+       }
+      }
+     }
+     Rectangle {
+      vertical-stretch: 1; clip: true; opacity: root.reduced-motion || root.suspended ? 1 : clamp(root.reveal, 0, 1);
+      VerticalLayout {
+       width: min(parent.width, 1120px); x: (parent.width - self.width) / 2; padding: 8px; spacing: 6px;
+       if root.page == 0: VerticalLayout {
+        spacing: 6px;
+        Card { height: 64px;
+         HorizontalLayout { padding: 10px; spacing: 6px;
+          VerticalLayout { spacing: 0px; alignment: center;
+           Eyebrow { text: "CURRENT PLAN"; height: 12px; }
+           Heading { text: root.active-name; height: 22px; }
+           Muted { text: root.handover-pending ? "Handing monitoring to this app…" : root.configuration-pending ? "Applying power settings…" : root.monitoring ? root.process-summary : "Monitoring paused"; height: 12px; }
+          }
+          VerticalLayout { alignment: center;
+           HorizontalLayout { height: 28px; spacing: 6px;
+            Action { text: root.monitoring ? "Pause" : "Start monitoring"; icon: root.monitoring ? "pause" : "play"; accent: true; enabled: root.connected && !root.observer && !root.handover-pending && !root.configuration-pending; clicked => { root.action("toggle"); } }
+            Action { text: root.startup ? "Startup on" : "Startup"; icon: root.startup ? "check" : "plus"; enabled: root.connected && !root.observer && !root.handover-pending; clicked => { root.action("startup"); } }
+            GhostIcon { icon: "chevron"; label: "Current plan details"; clicked => { root.modal = 8; } }
+           }
+          }
+         }
+        }
+        Card { height: root.compact-layout ? 192px : 244px;
+         VerticalLayout { padding: 10px; spacing: 2px;
+          HorizontalLayout { height: 20px; spacing: 4px;
+           Eyebrow { text: "LIVE CPU · 30s"; }
+           if root.show-p-cores: Muted { text: "P"; width: 12px; color: Theme.signal; }
+           if root.show-e-cores: Muted { text: "E"; width: 12px; color: Theme.cyan; }
+           if root.show-standard || root.show-l3-groups: Muted { text: root.show-l3-groups ? "AMD · L3" : "CPU"; width: 50px; }
+           Muted { text: root.cpu-trend-label; font-family: Theme.mono-font; horizontal-alignment: right; }
+           GhostIcon { height: 20px; width: 20px; icon: "heatmap"; label: root.heatmap-view ? "Show core labels" : "Show dense heatmap"; clicked => { root.heatmap-view = !root.heatmap-view; root.pro-setting("heatmap"); } }
+           topology-info := GhostIcon { height: 20px; width: 20px; icon: "info"; label: root.cpu-model + ". " + root.topology-summary; clicked => { root.modal = 12; } }
+          }
+          Rectangle { height: root.compact-layout ? 24px : 60px; background: Theme.canvas; border-radius: 8px;
+           for n in 3: Rectangle { y: n * (parent.height - 2px) / 2 + 1px; height: 1px; width: parent.width; background: Theme.text.with-alpha(0.04); }
+           Path { width: parent.width; height: parent.height; viewbox-width: 600; viewbox-height: 100; fit: fill; commands: root.cpu-switch-path; stroke: Theme.warning.with-alpha(0.65); stroke-width: 1px; fill: transparent; }
+           Path { width: parent.width; height: parent.height; viewbox-width: 600; viewbox-height: 100; fit: fill; commands: root.cpu-trend-path; stroke: Theme.muted.with-alpha(0.65); stroke-width: 1px; fill: transparent; }
+           Path { width: parent.width; height: parent.height; viewbox-width: 600; viewbox-height: 100; fit: fill; commands: root.cpu-p-trend-path; stroke: Theme.signal; stroke-width: 1.5px; fill: transparent; }
+           Path { width: parent.width; height: parent.height; viewbox-width: 600; viewbox-height: 100; fit: fill; commands: root.cpu-e-trend-path; stroke: Theme.cyan; stroke-width: 1.5px; fill: transparent; }
+           if !root.cpu-trend-available: Muted { text: "Collecting real Windows CPU samples…"; horizontal-alignment: center; }
+           // Indeterminate movement conveys waiting, never sample completion.
+           // Instantiation and animation are both gated to visible CPU warm-up.
+           if root.cpu-warming && root.render-active && !root.suspended: Rectangle {
+            x: 8px; y: parent.height - 3px; width: parent.width - 16px; height: 2px; border-radius: 1px; clip: true; background: Theme.cyan.with-alpha(0.08);
+            Rectangle { height: 2px; width: parent.width * 0.3; border-radius: 1px;
+             x: Theme.motion ? -self.width + (parent.width + self.width) * mod(animation-tick(), 1400ms) / 1400ms : parent.width * 0.35;
+             background: @linear-gradient(90deg, Theme.cyan.with-alpha(0.08), Theme.cyan.with-alpha(0.65), Theme.cyan.with-alpha(0.08));
+            }
+           }
+           // Slint 1.18 moved() is a pressed-drag callback. Pointer coordinates
+           // change for ordinary hover too, so no mouse button is required here.
+           chart-touch := TouchArea {
+            changed mouse-x => { if self.has-hover { root.graph-hover(clamp(self.mouse-x / max(1px, self.width), 0, 1)); } }
+            changed has-hover => { root.graph-hover(self.has-hover ? clamp(self.mouse-x / max(1px, self.width), 0, 1) : -1); }
+           }
+          }
+          // Explicit sections avoid treating a logical processor ordinal as a
+          // physical core/CCD. Row offsets are cached only when membership changes.
+          ScrollView { height: root.compact-layout ? 84px : 100px; content-width: self.width - 12px; content-height: max(self.height, root.total-core-rows * root.cpu-step + root.core-sections.length * 20px); horizontal-scrollbar-policy: always-off;
+           for section[section-index] in root.core-sections: Rectangle {
+            x: 0px;
+            y: (root.cpu-columns == 8 ? section.rows-8 : root.cpu-columns == 12 ? section.rows-12 : section.rows-16) * root.cpu-step + section-index * 20px;
+            width: parent.width; height: 20px + ceil(section.count / root.cpu-columns) * root.cpu-step;
+            // The controller filters and packs applicable sections first; this
+            // conditional also removes unsupported class content from the scene.
+            // Neutral C rows remain available for unknown logical keys on hybrids.
+            if section.count > 0 && (section.class == "P" ? root.show-p-cores : section.class == "E" ? root.show-e-cores : root.show-standard || root.show-l3-groups || root.is-hybrid): Rectangle {
+            x: 0px; y: 0px; width: parent.width; height: parent.height;
+            HorizontalLayout { x: 0px; y: 0px; width: parent.width; height: 16px; spacing: 6px;
+             Eyebrow { text: section.title; color: section.class == "P" ? Theme.signal : section.class == "E" ? Theme.cyan : Theme.muted; }
+             Muted { text: section.detail; font-size: 10px; horizontal-alignment: right; }
+            }
+            for i in section.count: Rectangle {
+            private property <CoreRow> core: root.cores[section.start + i];
+            x: mod(i, root.cpu-columns) * ((parent.width + 4px) / root.cpu-columns);
+            y: 20px + floor(i / root.cpu-columns) * root.cpu-step;
+            width: (parent.width - (root.cpu-columns - 1) * 4px) / root.cpu-columns; height: root.heatmap-view ? root.cpu-step - 4px : 18px; border-radius: root.heatmap-view ? 3px : 9px; clip: true;
+            private property <color> load-tint: core.activity < 0 ? Theme.muted : core.activity < 0.25 ? Theme.cyan : core.activity <= 0.75 ? Theme.signal : Theme.warning;
+            background: root.heatmap-view ? self.load-tint.with-alpha(core.activity < 0 ? 0.04 : 0.08 + core.activity * 0.55) : @linear-gradient(180deg, Theme.text.with-alpha(0.055), Theme.text.with-alpha(0.015));
+            border-width: 1px; border-color: core.fill.with-alpha(0.26);
+            Rectangle { x: 3px; y: 10px; height: 5px; width: max(0px, (parent.width - 6px) * core.activity); border-radius: 2.5px; background: root.heatmap-view ? transparent : parent.load-tint.with-alpha(0.3);
+             animate width, background { duration: Theme.motion ? 130ms : 0ms; easing: ease-out; }
+            }
+            if !root.heatmap-view: NumberLabel { text: core.label; font-size: 10px; color: core.activity >= 0 ? Theme.text : Theme.muted; horizontal-alignment: center; }
+            accessible-role: text; accessible-label: core.detail;
+            TouchArea { changed has-hover => { root.hovered-core = self.has-hover ? section.start + i : -1; } }
+            }
+            }
+           }
+           if root.cores.length == 0: Muted { text: "Reading Windows processor topology…"; horizontal-alignment: center; }
+          }
+          HorizontalLayout { height: 20px; spacing: 4px;
+           MetricPill { label: "CPU"; value: root.sensors-available && root.cpu-temp >= 0 ? round(root.cpu-temp) + "°C" : "—"; detail: root.cpu-sensor-provider; hover(h) => { root.hovered-sensor = h ? self.detail : ""; } tint: !root.sensors-available || root.cpu-temp < 0 ? Theme.muted : root.cpu-temp >= 90 ? Theme.danger : root.cpu-temp >= 75 ? Theme.warning : Theme.signal; }
+           MetricPill { label: "GPU"; value: (root.sensors-available && root.gpu-temp >= 0 ? round(root.gpu-temp) + "°C" : "—") + (root.sensors-available && root.gpu-utilization >= 0 ? " · " + round(root.gpu-utilization) + "%" : ""); detail: root.gpu-sensor-provider; hover(h) => { root.hovered-sensor = h ? self.detail : ""; } tint: !root.sensors-available || root.gpu-temp < 0 ? Theme.muted : root.gpu-temp >= 85 ? Theme.danger : root.gpu-temp >= 75 ? Theme.warning : Theme.signal; }
+           MetricPill { label: "Package"; value: root.sensors-available && root.cpu-package-watts >= 0 ? round(root.cpu-package-watts) + " W" : "—"; detail: root.power-sensor-provider; hover(h) => { root.hovered-sensor = h ? self.detail : ""; } }
+           MetricPill { label: root.gpu-fan-rpm >= 0 || root.gpu-fan-percent >= 0 ? "GPU fan" : "Fan"; value: !root.sensors-available ? "—" : root.gpu-fan-rpm >= 0 ? round(root.gpu-fan-rpm) + " RPM" : root.gpu-fan-percent >= 0 ? round(root.gpu-fan-percent) + "%" : root.fan-rpm >= 0 ? round(root.fan-rpm) + " RPM" : "—"; detail: root.fan-sensor-provider; hover(h) => { root.hovered-sensor = h ? self.detail : ""; } }
+          }
+          Muted { height: 13px; text: root.hovered-core >= 0 && root.hovered-core < root.cores.length ? root.cores[root.hovered-core].detail : root.hovered-sensor != "" ? root.hovered-sensor : root.telemetry + (root.sensors-available ? "" : " · Sensors unavailable"); }
+         }
+         // Tooltip starts below the chart and has no TouchArea, so it cannot
+         // steal hover and oscillate between showing/hiding under the pointer.
+         if root.graph-tooltip != "": Card { x: 12px; y: root.compact-layout ? 59px : 95px; width: min(360px, parent.width - 24px); height: 46px;
+          NumberLabel { x: 8px; width: parent.width - 16px; y: 5px; height: parent.height - 10px; text: root.graph-tooltip; font-size: 10px; wrap: word-wrap; }
+         }
+        }
+        Card { height: 40px;
+         HorizontalLayout { padding-left: 10px; padding-right: 10px; padding-top: 6px; padding-bottom: 6px; spacing: 8px;
+          Rectangle { width: 28px; height: 28px;
+           Path { commands: "M 16 4 A 12 12 0 1 1 16 28 A 12 12 0 1 1 16 4"; viewbox-width: 32; viewbox-height: 32; stroke: Theme.border; stroke-width: 3px; fill: transparent; }
+           Path { commands: root.session-donut-path; viewbox-width: 32; viewbox-height: 32; stroke: Theme.signal; stroke-width: 3px; fill: transparent; }
+          }
+          VerticalLayout { spacing: 1px; Eyebrow { text: "GAMING TIME"; } NumberLabel { text: root.session-gaming; font-weight: 600; } }
+          VerticalLayout { spacing: 1px; Eyebrow { text: "DEFAULT TIME"; } NumberLabel { text: root.session-default; font-weight: 600; } }
+          VerticalLayout { spacing: 1px; Eyebrow { text: "EST. POWER SAVED"; } NumberLabel { text: root.energy-savings; color: root.energy-savings-available ? Theme.signal : Theme.muted; } }
+          Action { text: root.compact-layout ? "Sensor…" : "Connect sensor"; control-height: 24px; ghost: true; accessible-label: "Connect sensor · energy measurement guidance"; clicked => { root.modal = 13; } }
+          GhostIcon { icon: "chevron"; label: "Session accounting details"; clicked => { root.modal = 8; } }
+         }
+        }
+        Card { min-height: 50px; vertical-stretch: 1;
+         VerticalLayout { padding-left: 10px; padding-right: 10px; padding-top: 6px; padding-bottom: 6px; spacing: 2px;
+          HorizontalLayout { height: 14px; Eyebrow { text: "POWER TIMELINE"; } Muted { text: "Select an event for details"; horizontal-alignment: right; } GhostIcon { icon: "chevron"; width: 18px; height: 16px; label: "All power events"; clicked => { root.modal = 10; } } }
+          if root.history.length == 0: Rectangle { height: 22px;
+           // Slint 1.18.1 has no stroke-dasharray; draw a dashed perimeter explicitly.
+           for n in 40: Rectangle { x: n * parent.width / 40; width: parent.width / 80; height: 1px; background: Theme.border; }
+           for n in 40: Rectangle { x: n * parent.width / 40; y: parent.height - 1px; width: parent.width / 80; height: 1px; background: Theme.border; }
+           Muted { text: "Next switch → time · previous plan → target · trigger"; horizontal-alignment: center; }
+          }
+          if root.history.length > 0: HorizontalLayout { height: 26px; spacing: 6px;
+           for i in min(root.compact-layout ? 6 : 10, root.history.length): Action { text: "● " + (i + 1); ghost: true; control-height: 24px; selected: self.hovered; min-width: 32px; max-width: 44px; expand: true; background: (root.history[i].gaming ? Theme.signal : Theme.cyan).with-alpha(self.hovered ? 0.16 : 0.06); border-color: (root.history[i].gaming ? Theme.signal : Theme.cyan).with-alpha(0.18); clicked => { root.event-selected(i); root.modal = 11; } }
+           Muted { text: root.history[0].label; horizontal-alignment: right; }
+          }
+         }
+        }
+       }
+       if root.page == 1: VerticalLayout {
+        spacing: 6px;
+        HorizontalLayout { height: 28px; spacing: 6px;
+         Field { text <=> root.search-text; placeholder: "Search games or processes"; search: true; edited(s) => { root.search(s); } }
+         GhostIcon { icon: "plus"; label: "Bulk add processes"; enabled: !root.observer; clicked => { root.modal = 5; } }
+         Action { text: "Running"; icon: "search"; enabled: !root.observer; clicked => { root.pro-command("running-processes"); } }
+         Action { text: "Browse"; icon: "plus"; enabled: !root.observer; clicked => { root.action("browse"); } }
+        }
+        HorizontalLayout { height: 28px; spacing: 6px;
+         Action { text: "Discover"; icon: "grid"; enabled: !root.observer; clicked => { root.action("discover"); } }
+         Action { text: "Foreground app"; ghost: true; enabled: !root.observer; clicked => { root.pro-command("foreground-process"); } }
+         Rectangle { horizontal-stretch: 1; }
+         Action { text: root.auto-discover ? "Auto-discover on" : "Auto-discover off"; icon: root.auto-discover ? "check" : "plus"; ghost: true; selected: root.auto-discover; enabled: !root.observer; clicked => { root.auto-discover = !root.auto-discover; root.pro-setting("auto-discover"); } }
+        }
+        VerticalLayout { spacing: 6px;
+         for game[i] in root.games: Card {
+          height: 52px;
+          private property <float> selection-glow: game.selected ? (Theme.motion ? 0.08 + 0.025 * sin(360deg * animation-tick() / 2400ms) : 0.09) : 0;
+          background: game.selected ? @linear-gradient(105deg, Theme.signal.with-alpha(self.selection-glow), Theme.surface 70%) : tile-touch.has-hover ? Theme.elevated : Theme.surface;
+          border-color: tile-focus.has-focus ? Theme.cyan.with-alpha(0.55) : Theme.border;
+          drop-shadow-color: tile-focus.has-focus ? Theme.cyan.with-alpha(0.25) : game.selected ? Theme.signal.with-alpha(0.12) : Theme.shade;
+          drop-shadow-blur: game.selected || tile-focus.has-focus ? 9px : 6px; drop-shadow-offset-y: 2px;
+          animate background, border-color, drop-shadow-color { duration: Theme.motion ? 120ms : 0ms; }
+          opacity: root.reduced-motion ? 1 : clamp(root.reveal * 1.5 - i * 0.12, 0, 1);
+          HorizontalLayout { padding: 10px; spacing: 8px;
+           Rectangle { width: 30px; height: 30px; border-radius: 8px; background: Theme.canvas; drop-shadow-color: #00000066; drop-shadow-blur: 6px; drop-shadow-offset-y: 2px;
+            if game.icon.width > 0: Image { source: game.icon; image-fit: contain; width: 24px; height: 24px; x: 3px; y: 3px; }
+            if game.icon.width == 0: Icon { kind: "grid"; stroke: Theme.cyan; x: 8px; y: 8px; }
+           }
+           VerticalLayout { spacing: 4px; Label { text: game.name; font-weight: 600; } Muted { text: game.processes; } }
+           if root.process-status-available && i < root.games-running.length && root.games-running[i]: MetricPill { width: 65px; horizontal-stretch: 0; label: "●"; value: "RUNNING"; tint: Theme.signal; }
+           if game.selected: Icon { kind: "check"; stroke: Theme.signal; }
+          }
+          accessible-role: button; accessible-label: game.name + ", " + game.processes; accessible-enabled: !Theme.modal-open; accessible-action-default => { if !Theme.modal-open { root.select-game(game.id); } }
+          tile-focus := FocusScope { enabled: !Theme.modal-open; key-pressed(e) => { if e.text == " " || e.text == "\n" { root.select-game(game.id); return accept; } return reject; } }
+          tile-touch := TouchArea { enabled: !Theme.modal-open; mouse-cursor: pointer; clicked => { tile-focus.focus(); root.select-game(game.id); } }
+         }
+         if root.games.length == 0: Card { height: 52px; Muted { text: "No matching game profiles"; horizontal-alignment: center; } }
+        }
+        HorizontalLayout { height: 28px; spacing: 6px;
+         Action { text: "Profile settings"; enabled: root.has-selection && !root.observer; clicked => { root.action("edit-game"); } }
+         Action { text: "Remove"; danger: true; ghost: true; enabled: root.has-selection && !root.observer; clicked => { root.action("remove"); } }
+         Rectangle { horizontal-stretch: 1; }
+         GhostIcon { icon: "left"; label: "Previous game page"; enabled: root.can-back; clicked => { root.action("previous"); } }
+         Muted { text: root.page-label; horizontal-alignment: center; width: 44px; }
+         GhostIcon { icon: "right"; label: "Next game page"; enabled: root.can-next; clicked => { root.action("next"); } }
+        }
+        Muted { height: 14px; text: root.process-status-available ? "Running badges follow detected process names." : "Process tracking is paused. Start monitoring to see running games."; }
+        Rectangle { vertical-stretch: 1; }
+       }
+       if root.page == 2: VerticalLayout {
+        spacing: 6px;
+        HorizontalLayout { height: 24px; spacing: 6px;
+         Heading { text: "Utility settings"; }
+         GhostIcon { icon: "refresh"; label: "Refresh Windows power plans"; clicked => { root.action("refresh"); } }
+         GhostIcon { icon: "external"; label: "Open activity log"; clicked => { root.action("log"); } }
+        }
+        HorizontalLayout { height: 28px; spacing: 4px;
+         for label[i] in ["Power", "Automation", "Window & keys", "Integrations"]: SectionTab { text: label; selected: root.settings-section == i; clicked => { root.settings-section = i; } }
+        }
+        if root.settings-section == 0: VerticalLayout { spacing: 6px;
+         Card { height: 112px; VerticalLayout { padding: 10px; spacing: 4px;
+          for label[i] in ["GAMING PLAN", "DEFAULT PLAN"]: VerticalLayout { spacing: 2px;
+           Eyebrow { text: label; height: 12px; }
+           HorizontalLayout { height: 28px; spacing: 4px;
+            Action { text: i == 0 ? root.gaming-name : root.default-name; icon: "chevron"; expand: true; align-left: true; enabled: !root.observer && !root.configuration-pending; clicked => { root.plan-kind = i; root.plan-search = ""; root.plan-filter(""); } }
+            GhostIcon { icon: "export"; label: label + ": Export .pow"; enabled: root.power-tools-available && !root.observer; clicked => { root.power-tool(i, "export"); } }
+            GhostIcon { icon: "copy"; label: label + ": Duplicate plan"; enabled: root.power-tools-available && !root.observer; clicked => { root.power-tool(i, "duplicate"); } }
+            GhostIcon { icon: "settings"; label: label + ": Advanced Windows settings"; enabled: root.power-tools-available && !root.observer; clicked => { root.power-tool(i, "advanced"); } }
+           }
+          }
+         } }
+         HorizontalLayout { height: 28px; spacing: 6px;
+          Action { text: "Import .pow"; icon: "plus"; ghost: true; enabled: root.power-tools-available && !root.observer; clicked => { root.pro-command("import-plan"); } }
+          Muted { text: root.configuration-pending ? "Applying selection…" : "Select to apply safely · no manual pause needed"; }
+         }
+         if root.elevated-plan-retry: HorizontalLayout { height: 36px; spacing: 8px;
+          Muted { text: "Windows requires approval for this .pow operation (0x522 / access denied). Retry opens its approval prompt; monitoring stays unelevated."; wrap: word-wrap; }
+          VerticalLayout { alignment: center; Action { text: "Retry with Windows approval"; enabled: !root.observer; clicked => { root.pro-command("retry-elevated"); } } }
+         }
+         ToggleRow { text: "Best performance overlay"; detail: "Windows power mode; restored on pause. Not an on-screen HUD."; checked: root.overlay; enabled: !root.observer; clicked => { root.action("overlay"); } }
+         ToggleRow { text: "Reduce interface motion"; detail: "Immediate transitions; no decorative animation."; checked: root.reduced-motion; enabled: !root.observer; clicked => { root.action("motion"); } }
+         HorizontalLayout { height: 28px; spacing: 6px;
+          Action { text: "Overlay settings"; icon: "settings"; ghost: true; clicked => { root.modal = 6; } }
+          Muted { text: root.visual-overlay-available ? "Desktop telemetry HUD available" : "Desktop telemetry HUD unavailable"; }
+         }
+        }
+        if root.settings-section == 1: VerticalLayout { spacing: 6px;
+         ToggleRow { text: "Require a foreground game"; detail: "Off: any matching process keeps the Gaming plan active."; checked: root.foreground-only; enabled: root.automation-available && !root.observer; clicked => { root.foreground-only = !root.foreground-only; root.pro-setting("foreground-only"); } }
+         for label[i] in ["Switch to Default on Battery", "Auto-apply process tuning", "Trigger by Time of Day"]: Card {
+          height: root.automation-expanded == i ? (i == 2 ? 154px : 126px) : 38px;
+          VerticalLayout { padding: 5px; spacing: 6px;
+           Action { text: label; icon: "chevron"; expand: true; align-left: true; ghost: true; selected: root.automation-expanded == i; clicked => { root.automation-expanded = root.automation-expanded == i ? -1 : i; } }
+           if root.automation-expanded == i: VerticalLayout { padding-left: 5px; padding-right: 5px; spacing: 4px;
+            ToggleRow { text: "Enable rule"; detail: i == 0 ? "Use configured Default plan on DC power" : i == 1 ? "Affinity and priority from saved game profiles" : "Local time window, including across midnight";
+             checked: i == 0 ? root.auto-switch-battery : i == 1 ? root.auto-apply-affinity : root.auto-time-rule; enabled: root.automation-available && !root.observer;
+             clicked => { if i == 0 { root.auto-switch-battery = !root.auto-switch-battery; root.pro-setting("battery"); } else if i == 1 { root.auto-apply-affinity = !root.auto-apply-affinity; root.pro-setting("affinity"); } else { root.auto-time-rule = !root.auto-time-rule; root.automation-start = root.time-start-draft; root.automation-end = root.time-end-draft; root.pro-setting("time"); root.time-draft-dirty = false; } }
+            }
+            if i == 0: Muted { height: 24px; text: "Target: " + root.default-name + " · restores the game policy on AC"; }
+            if i == 1: HorizontalLayout { height: 28px; Action { text: "Edit game profiles"; icon: "grid"; ghost: true; clicked => { root.page = 1; } } Muted { text: "Uses saved affinity and priority"; } }
+            if i == 2: HorizontalLayout { height: 28px; spacing: 6px; Field { text <=> root.time-start-draft; placeholder: "Start HH:MM"; edited(_) => { root.time-draft-dirty = true; } } Muted { text: "→"; width: 10px; } Field { text <=> root.time-end-draft; placeholder: "End HH:MM"; edited(_) => { root.time-draft-dirty = true; } } }
+            if i == 2: HorizontalLayout { height: 28px; Rectangle { horizontal-stretch: 1; } Action { text: "Apply rule"; enabled: root.automation-available && !root.observer; clicked => { root.automation-start = root.time-start-draft; root.automation-end = root.time-end-draft; root.pro-setting("time"); root.time-draft-dirty = false; } } }
+           }
+          }
+         }
+         Muted { height: 26px; wrap: word-wrap; text: "Per-game scheduling is set in Workspace → Profile settings. Original scheduling is restored when monitoring stops."; }
+        }
+        if root.settings-section == 2: ScrollView { vertical-stretch: 1; content-width: self.width - 12px; content-height: max(self.height, 366px); horizontal-scrollbar-policy: always-off;
+         VerticalLayout { spacing: 6px; padding: 1px;
+          ToggleRow { text: "Follow Windows theme"; detail: "Use the Windows light or dark application preference."; checked: root.sync-system-theme; clicked => { root.sync-system-theme = !root.sync-system-theme; root.pro-setting("sync-theme"); } }
+          ToggleRow { text: "Native window frame"; detail: "Windows caption buttons, Snap layouts and system menu."; checked: root.native-frame; clicked => { root.native-frame = !root.native-frame; root.pro-setting("native-frame"); } }
+          ToggleRow { text: "Close to system tray"; detail: "Keep monitoring in the background; Exit restores Default."; checked: root.minimize-to-tray; enabled: root.tray-available && !root.observer; clicked => { root.minimize-to-tray = !root.minimize-to-tray; root.pro-setting("close-to-tray"); } }
+          ToggleRow { text: "Start minimized"; detail: "Launch to the system tray with the saved monitoring state."; checked: root.start-minimized; enabled: root.tray-available && !root.observer; clicked => { root.start-minimized = !root.start-minimized; root.pro-setting("start-minimized"); } }
+          Card { height: 88px; VerticalLayout { padding: 10px; spacing: 4px;
+           Eyebrow { text: "GLOBAL HOTKEY · TOGGLE PLANS"; height: 12px; }
+           HorizontalLayout { height: 28px; spacing: 6px;
+            Field { text <=> root.global-hotkey; placeholder: "Ctrl + Alt + P"; }
+            Action { text: "Apply"; enabled: root.hotkeys-available; clicked => { root.pro-setting("global-hotkey"); } }
+           }
+           Muted { text: root.hotkey-status; height: 12px; }
+          } }
+          HorizontalLayout { height: 28px; spacing: 6px;
+           Action { text: "Tray controls"; icon: "grid"; ghost: true; enabled: root.tray-available; clicked => { root.modal = 7; } }
+           Action { text: root.compact-mode ? "Expanded 800 × 600" : "Compact 584 × 526"; ghost: true; clicked => { root.compact-mode = !root.compact-mode; root.layout-mode(root.compact-mode); } }
+           Rectangle { horizontal-stretch: 1; }
+          }
+          Rectangle { vertical-stretch: 1; }
+         }
+        }
+        if root.settings-section == 3: VerticalLayout { spacing: 6px;
+         Card { height: 148px; VerticalLayout { padding: 10px; spacing: 6px;
+          Eyebrow { text: "WINDOWS INTEGRATIONS"; height: 14px; }
+          Muted { text: root.provider-status; wrap: word-wrap; }
+          HorizontalLayout { height: 28px; spacing: 6px;
+           Action { text: root.sensors-available ? "Retry sensors" : "Connect sensors"; icon: "refresh"; clicked => { root.pro-command("connect-sensors"); } }
+           Muted { text: "GPU driver APIs · LHM / OHM Windows providers"; }
+          }
+         } }
+         Card { height: 92px; VerticalLayout { padding: 10px; spacing: 6px;
+          Eyebrow { text: "SESSION & DIAGNOSTICS"; height: 14px; }
+          HorizontalLayout { height: 28px; spacing: 6px;
+           Action { text: "Export CSV"; icon: "export"; clicked => { root.pro-command("export-csv"); } }
+           Action { text: "Export JSON"; ghost: true; clicked => { root.pro-command("export-json"); } }
+           Action { text: "Diagnostics"; ghost: true; clicked => { root.pro-command("export-diagnostics"); } }
+           Rectangle { horizontal-stretch: 1; }
+          }
+         } }
+         Muted { text: "Unavailable measurements remain —. No temperature, power or energy estimates are invented."; wrap: word-wrap; height: 28px; }
+        }
+        if root.settings-section != 2: Rectangle { vertical-stretch: 1; }
+        Muted { text: root.backend; height: 12px; }
+       }
+      }
+     }
+     // The footer is 28px tall. The 28px avatar sits beside a 24px inset pill,
+     // rather than being squeezed into a 24px box with impossible padding.
+     HorizontalLayout { height: 32px; padding-left: 8px; padding-right: 8px; padding-top: 2px; padding-bottom: 2px; spacing: 6px;
+      Rectangle { width: 140px; height: 28px; border-radius: 14px;
+       transform-scale: developer-touch.pressed ? 0.975 : developer-touch.has-hover && Theme.motion ? 1.015 : 1;
+       animate transform-scale { duration: Theme.motion ? 140ms : 0ms; easing: ease-out; }
+       Rectangle { x: 14px; y: 2px; width: parent.width - 14px; height: 24px; border-radius: 12px;
+        background: developer-touch.has-hover ? @linear-gradient(180deg, Theme.elevated.brighter(0.08), Theme.surface) : Theme.elevated;
+        border-width: 1px; border-color: developer-focus.has-focus ? Theme.cyan.with-alpha(0.5) : Theme.border;
+        drop-shadow-color: developer-focus.has-focus ? Theme.cyan.with-alpha(0.3) : developer-touch.has-hover ? Theme.signal.with-alpha(0.15) : transparent;
+        drop-shadow-blur: 8px;
+        animate background, border-color, drop-shadow-color { duration: Theme.motion ? 140ms : 0ms; easing: ease-out; }
+       }
+       Rectangle { x: 0px; y: 0px; width: 28px; height: 28px; border-radius: 14px; border-width: 1px; border-color: Theme.border;
+        Rectangle { x: 1px; y: 1px; width: 26px; height: 26px; border-radius: 13px; clip: true; Image { source: @image-url("../assets/developer.png"); image-fit: cover; } }
+        // Profile accent, not Discord presence: profile data is an offline snapshot.
+        Rectangle { x: 20px; y: 20px; width: 6px; height: 6px; border-radius: 3px; background: Theme.signal;
+         border-width: 1px; border-color: Theme.canvas; drop-shadow-color: Theme.signal.with-alpha(0.4); drop-shadow-blur: 4px;
+         opacity: Theme.motion && developer-touch.has-hover ? 0.8 + 0.2 * sin(360deg * animation-tick() / 1600ms) : 1;
+        }
+       }
+       HorizontalLayout { x: 34px; y: 2px; width: parent.width - 40px; height: 24px; spacing: 4px;
+        Label { text: "nn6"; font-size: 12px; font-weight: 600; horizontal-stretch: 0; }
+        Muted { text: "MAINTAINER"; font-size: 10px; letter-spacing: 0px; color: Theme.dark ? #BCC4D1 : #414653; horizontal-alignment: right; }
+       }
+       forward-focus: developer-focus;
+       accessible-role: button; accessible-label: "Open nn6 developer / maintainer profile. Decorative accent is not online status."; accessible-enabled: !Theme.modal-open; accessible-action-default => { if !Theme.modal-open { root.modal = 1; } }
+       developer-focus := FocusScope { enabled: !Theme.modal-open; key-pressed(e) => { if e.text == "\n" || e.text == " " { root.modal = 1; return accept; } return reject; } }
+       developer-touch := TouchArea { enabled: !Theme.modal-open; mouse-cursor: pointer; clicked => { developer-focus.focus(); root.modal = 1; } }
+      }
+      GhostIcon { icon: "external"; label: "Open nn6 Discord profile"; clicked => { root.action("discord"); } }
+      Rectangle { horizontal-stretch: 1; }
+      Muted { text: "© NN6. Open Source."; horizontal-alignment: right; font-size: 10px; }
+      Action { text: "About"; ghost: true; control-height: 24px; clicked => { root.modal = 4; } }
+      Muted { text: "v2.3.6"; font-family: Theme.mono-font; horizontal-alignment: right; font-size: 10px; }
+     }
+    }
+    if shield.hovered || header-status.hovered: Card {
+     x: parent.width - self.width - 12px; y: 37px; width: 340px; height: shield.hovered ? 80px : 60px;
+     VerticalLayout { padding: 10px; spacing: 4px;
+      Label { text: shield.hovered ? root.detector-label : root.state-label; }
+      Muted { text: shield.hovered ? "Windows APIs · no game injection or memory scanning.\nAnti-cheat compatibility is not certified." : root.status; wrap: word-wrap; }
+     }
+    }
+    if !root.native-frame: Rectangle { x: parent.width - 15px; y: parent.height - 15px; width: 14px; height: 14px; TouchArea { mouse-cursor: nwse-resize; pointer-event(e) => { if e.kind == PointerEventKind.down { root.window-action(4); } } } }
+    Rectangle { x: 11px; y: 0px; width: parent.width - 22px; height: 1px; background: @linear-gradient(90deg, #10A37F00, #10A37F88, #00E5FF66, #00E5FF00); }
+   }
+  }
+  // In-window dialogs take keyboard focus and disable background focus targets.
+  if root.dialog-open: FocusScope {
+   init => { self.focus(); }
+   Rectangle { border-radius: 10px; background: #000000B3;
+    Rectangle { background: @radial-gradient(circle, #3C567D21 0%, #00000000 100%); }
+    TouchArea { clicked => { root.close-dialog(); } }
+    Card {
+     x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+     width: min(440px, parent.width - 24px);
+     height: min(parent.height - 24px, (root.modal == 1 ? (self.width < 404px ? 400px : 340px) : root.modal == 13 ? 330px : root.modal == 12 ? 310px : root.modal == 5 ? 200px : root.modal == 6 ? 330px : root.modal == 7 ? 250px : root.modal == 8 ? 264px : root.modal == 9 ? 270px : root.modal == 10 ? 368px : root.modal == 11 ? 310px : root.modal == 2 ? 344px : root.modal == 3 ? 344px : root.modal == 4 ? 320px : root.plan-kind >= 0 ? 326px : 310px) + (root.error ? 34px : 0px));
+     background: @linear-gradient(140deg, Theme.surface.brighter(0.035), Theme.surface 55%, Theme.surface);
+     border-color: Theme.border; border-radius: 12px; drop-shadow-color: Theme.shade; drop-shadow-blur: 12px; drop-shadow-offset-y: 4px;
+     TouchArea { }
+     VerticalLayout { padding: 12px; spacing: 8px;
+      HorizontalLayout { height: root.modal == 1 || root.modal == 4 ? 26px : 24px; spacing: 6px;
+       Heading { text: root.plan-kind >= 0 ? "Choose a power plan" : root.modal == 13 ? "Sensor & energy guidance" : root.modal == 12 ? "CPU topology" : root.modal == 1 ? "Developer profile" : root.modal == 2 ? root.candidate-source : root.modal == 4 ? "About Game Power Plan Switcher" : root.modal == 5 ? "Bulk add processes" : root.modal == 6 ? "Overlay settings" : root.modal == 7 ? "System tray controls" : root.modal == 8 ? "Current power plan" : root.modal == 9 ? "Status & process detection" : root.modal == 10 ? "Power transition timeline" : root.modal == 11 ? "Power event details" : root.edit-name; }
+       if root.modal == 1 || root.modal == 4: TrafficLights {
+        in-dialog: true; show-minimize: false;
+        close-label: root.modal == 1 ? "Close developer profile dialog" : "Close About dialog";
+        closed => { root.close-dialog(); }
+       }
+       if root.modal != 1 && root.modal != 4: GhostIcon { in-dialog: true; icon: "close"; label: "Close dialog"; clicked => { root.close-dialog(); } }
+      }
+      if root.error: Muted { height: 26px; text: root.status; color: Theme.danger; wrap: word-wrap; }
+      if root.modal == 13: VerticalLayout { spacing: 8px;
+       Eyebrow { text: "LOCAL, READ-ONLY HARDWARE SOURCES"; height: 14px; }
+       Label { text: "NVIDIA uses NVML; AMD uses ADL8. GPU measurements become available only when the installed driver exposes them."; wrap: word-wrap; }
+       Muted { text: "CPU temperature, package power and board fans need an existing LibreHardwareMonitor or OpenHardwareMonitor WMI provider. This app does not install a driver or request elevation for sensors."; wrap: word-wrap; }
+       Rectangle { height: 1px; background: Theme.border; }
+       Label { text: "Energy savings need measured energy and a comparison baseline. Temperature or package watts alone cannot establish savings; this value remains unavailable."; wrap: word-wrap; }
+       Muted { text: root.provider-status; wrap: word-wrap; }
+       Rectangle { vertical-stretch: 1; }
+       HorizontalLayout { height: 28px; spacing: 6px;
+        Action { in-dialog: true; text: "Retry local sources"; icon: "refresh"; clicked => { root.pro-command("connect-sensors"); } }
+        Action { in-dialog: true; text: "Integrations"; ghost: true; clicked => { root.modal = 0; root.page = 2; root.settings-section = 3; } }
+        Rectangle { horizontal-stretch: 1; }
+       }
+      }
+      if root.modal == 12: VerticalLayout { spacing: 10px;
+       Heading { text: root.cpu-model; font-size: 18px; height: 44px; wrap: word-wrap; }
+       Badge { text: root.cpu-vendor + " · Windows topology"; }
+       Rectangle { height: 1px; background: Theme.border; }
+       ScrollView { vertical-stretch: 1; content-width: self.width - 12px; content-height: topology-description.preferred-height; horizontal-scrollbar-policy: always-off;
+        topology-description := Label { x: 0px; y: 0px; width: parent.width; text: root.topology-detail; wrap: word-wrap; vertical-alignment: top; }
+       }
+      }
+      if root.modal == 1: VerticalLayout { spacing: 8px;
+       // Keep identity separate from metadata: 12px breathing room, then a divider.
+       VerticalLayout { height: 69px; spacing: 0px;
+        HorizontalLayout { height: 56px; spacing: 12px;
+         Rectangle { width: 56px; height: 56px; border-radius: 28px; border-width: 1px; border-color: Theme.border;
+          Rectangle { x: 1px; y: 1px; width: 54px; height: 54px; border-radius: 27px; clip: true; Image { source: @image-url("../assets/developer.png"); image-fit: cover; } }
+         }
+         VerticalLayout { spacing: 3px; alignment: center;
+          Heading { height: 24px; text: "Af ✦"; font-family: "Segoe UI Symbol"; font-size: 20px; font-weight: 600; }
+          Label { height: 13px; text: "nn6"; font-size: 11px; }
+          Muted { height: 13px; text: "Developer of Game Power Plan Switcher"; font-size: 10px; }
+         }
+        }
+        Rectangle { height: 12px; }
+        Rectangle { height: 1px; background: Theme.border; }
+       }
+       // Conditional layouts are supported by Slint 1.18.1; no CSS/FlowLayout.
+       profile-badges := Rectangle {
+        // Card width is min(440px, window - 24px), with 24px content inset.
+        // Use the window breakpoint, not this layout's own measured width,
+        // to avoid a conditional layout-info / width dependency cycle.
+        private property <bool> stacked: root.width < 428px;
+        height: self.stacked ? 84px : 24px;
+        if !profile-badges.stacked: HorizontalLayout { spacing: 8px; alignment: start;
+         Badge { text: "Member Since May 1, 2016"; }
+         Badge { text: "HypeSquad Brilliance"; }
+         Badge { text: "Nitro"; }
+        }
+        if profile-badges.stacked: VerticalLayout { spacing: 6px; alignment: start;
+         Badge { text: "Member Since May 1, 2016"; }
+         Badge { text: "HypeSquad Brilliance"; }
+         Badge { text: "Nitro"; }
+        }
+       }
+       Muted { height: 28px; text: "Nitro since Sep 23, 2026 · Completed a Quest\nFormerly Shadows#2321"; wrap: word-wrap; font-size: 10px; }
+       Rectangle { height: 1px; background: Theme.border; }
+       HorizontalLayout { height: 28px; spacing: 6px; Action { in-dialog: true; text: "Open Discord profile ↗"; accent: true; control-height: 28px; clicked => { root.action("discord"); } } Rectangle { horizontal-stretch: 1; } }
+       HorizontalLayout { height: 28px; spacing: 6px; Action { in-dialog: true; text: "Copy link"; icon: "copy"; ghost: true; control-height: 28px; clicked => { root.action("copy-discord"); } } Action { in-dialog: true; text: "Twitch · mikimeows ↗"; ghost: true; control-height: 28px; clicked => { root.action("twitch"); } } Rectangle { horizontal-stretch: 1; } }
+       Rectangle { vertical-stretch: 1; } Muted { text: "Public profile snapshot · verified October 3, 2026"; font-size: 10px; }
+      }
+      if root.plan-kind >= 0: VerticalLayout { spacing: 6px;
+       Muted { height: 14px; text: root.plan-kind == 2 ? "Profile draft · Save profile applies the override." : root.configuration-pending ? "Applying selection…" : root.monitoring ? "Applying briefly pauses monitoring, then resumes it." : "Choose a plan to save your selection."; }
+       Field { in-dialog: true; text <=> root.plan-search; search: true; placeholder: "Search installed power plans"; edited(s) => { root.plan-filter(s); } accepted => { if root.plan-options.length > 0 { root.choose-plan(root.plan-index); } } }
+       if root.plan-options.length == 0: Rectangle { height: 100px; Muted { text: "No matching power plans. Try a different name."; horizontal-alignment: center; } }
+       for option[i] in root.plan-options: Action { in-dialog: true; text: option; expand: true; align-left: true; selected: root.plan-index == i; ghost: true; control-height: 28px; changed focused => { if self.focused { root.plan-index = i; } } activated => { root.choose-plan(root.plan-index); } clicked => { root.choose-plan(i); } }
+       Rectangle { vertical-stretch: 1; }
+       HorizontalLayout { height: 24px; spacing: 6px;
+        Muted { text: "↑ ↓ select · Enter apply · Esc close"; font-size: 10px; }
+        GhostIcon { in-dialog: true; icon: "left"; label: "Previous power plans"; enabled: root.plan-back; clicked => { root.action("plan-previous"); } }
+        Muted { text: root.plan-page-label; width: 44px; horizontal-alignment: center; }
+        GhostIcon { in-dialog: true; icon: "right"; label: "Next power plans"; enabled: root.plan-next; clicked => { root.action("plan-next"); } }
+       }
+      }
+      if root.modal == 2: VerticalLayout { spacing: 6px;
+       Field { in-dialog: true; placeholder: "Search name or executable"; search: true; edited(s) => { root.search(s); } }
+       if root.candidates.length == 0: Muted { text: "No matching executables. Clear the search or refresh the process/library list."; wrap: word-wrap; }
+       for game in root.candidates: Action { in-dialog: true; text: game.name + " · " + game.processes; expand: true; align-left: true; ghost: true; control-height: 28px; clicked => { root.add-candidate(game.id); } }
+       Rectangle { vertical-stretch: 1; }
+       HorizontalLayout { height: 24px; spacing: 6px;
+        Muted { text: "Review each executable before adding."; font-size: 10px; }
+        GhostIcon { in-dialog: true; icon: "left"; label: "Previous candidates"; enabled: root.candidate-back; clicked => { root.action("candidate-previous"); } }
+        Muted { text: root.candidate-page-label; width: 44px; horizontal-alignment: center; }
+        GhostIcon { in-dialog: true; icon: "right"; label: "Next candidates"; enabled: root.candidate-next; clicked => { root.action("candidate-next"); } }
+       }
+      }
+      if root.modal == 3: VerticalLayout { spacing: 6px;
+       Muted { text: root.selected-processes; wrap: word-wrap; }
+       Eyebrow { text: "POWER PLAN OVERRIDE"; height: 12px; }
+       Action { in-dialog: true; text: root.game-plan-name; icon: "chevron"; expand: true; align-left: true; clicked => { root.modal = 0; root.plan-kind = 2; root.plan-search = ""; root.plan-filter(""); } }
+       Eyebrow { text: "PROCESS PRIORITY"; }
+       HorizontalLayout { height: 28px; spacing: 6px; for label[i] in ["Default", "Normal", "Above", "High"]: Action { in-dialog: true; text: label; selected: root.priority-index == i; control-height: 28px; clicked => { root.priority-index = i; } } Rectangle { horizontal-stretch: 1; } }
+       Eyebrow { text: "CPU AFFINITY"; }
+       Field { in-dialog: true; text <=> root.affinity-text; placeholder: "Blank, performance, efficiency, physical, or hex mask"; }
+       Muted { text: "physical / performance-physical: one thread per physical core\n(single processor group). Restored on stop; Windows may deny changes."; wrap: word-wrap; font-size: 10px; }
+       Rectangle { vertical-stretch: 1; }
+       HorizontalLayout { height: 28px; spacing: 6px;
+        Action { in-dialog: true; text: "Reset to Default"; icon: "refresh"; ghost: true; clicked => { root.action("profile-reset"); } }
+        Rectangle { horizontal-stretch: 1; }
+        Action { in-dialog: true; text: "Save profile"; accent: true; control-height: 28px; enabled: !root.configuration-pending && !root.observer; clicked => { root.action("save-game"); } }
+       }
+      }
+      if root.modal == 5: VerticalLayout { spacing: 8px;
+       Muted { text: "Add several executables to your workspace at once."; height: 14px; }
+       HorizontalLayout { height: 28px; spacing: 6px;
+        Field { in-dialog: true; text <=> root.bulk-text; invalid: root.bulk-error; placeholder: "RainbowSix.exe, Game.exe"; edited(s) => { root.bulk-edit(s); } accepted => { if root.bulk-valid && !root.observer { root.action("bulk"); } } }
+        Action { in-dialog: true; text: "Add"; icon: "plus"; accent: true; enabled: root.bulk-valid && !root.observer; clicked => { root.action("bulk"); } }
+       }
+       Muted { text: "Separate process names with commas; include .exe."; height: 14px; }
+       Rectangle { height: 36px; border-radius: 8px; background: root.bulk-error ? Theme.danger.with-alpha(0.06) : Theme.text.with-alpha(0.025); border-width: 1px; border-color: root.bulk-error ? Theme.danger.with-alpha(0.2) : transparent;
+        Muted { x: 8px; y: 4px; width: parent.width - 16px; height: parent.height - 8px; text: root.validation; wrap: word-wrap; color: root.bulk-error ? Theme.danger : Theme.muted; }
+       }
+       Rectangle { vertical-stretch: 1; }
+      }
+      if root.modal == 6: VerticalLayout { spacing: 6px;
+       Muted { height: 14px; text: root.visual-overlay-available ? "Desktop telemetry overlay available" : "Desktop telemetry overlay unavailable"; }
+       ToggleRow { in-dialog: true; text: "Show on-screen overlay"; detail: "Separate from Windows Best performance power mode."; checked: root.visual-overlay-enabled; enabled: root.visual-overlay-available; clicked => { root.visual-overlay-enabled = !root.visual-overlay-enabled; root.pro-setting("visual-overlay"); } }
+       Eyebrow { height: 12px; text: "POSITION"; }
+       VerticalLayout { spacing: 4px;
+        for row in 2: HorizontalLayout { height: 28px; spacing: 4px;
+         for col in 2: Action { in-dialog: true; expand: true; text: row == 0 ? (col == 0 ? "Top-left" : "Top-right") : (col == 0 ? "Bottom-left" : "Bottom-right"); selected: root.overlay-position == row * 2 + col; ghost: true; clicked => { root.overlay-position = row * 2 + col; } }
+        }
+       }
+       HorizontalLayout { height: 28px; spacing: 8px;
+        Eyebrow { text: "OPACITY"; width: 55px; }
+        Slider { minimum: 0; maximum: 100; step: 1; value <=> root.overlay-opacity; }
+        NumberLabel { text: round(root.overlay-opacity) + "%"; width: 34px; horizontal-alignment: right; }
+       }
+       Field { in-dialog: true; text <=> root.overlay-hotkey; placeholder: "Overlay toggle hotkey"; }
+       Muted { text: "Monitored full-screen focus pauses HUD; it resumes on return."; height: 14px; }
+       Rectangle { vertical-stretch: 1; }
+       HorizontalLayout { height: 28px; Rectangle { horizontal-stretch: 1; } Action { in-dialog: true; text: "Apply overlay"; accent: true; enabled: root.visual-overlay-available && root.hotkeys-available; clicked => { root.pro-setting("overlay-layout"); } } }
+      }
+      if root.modal == 7: VerticalLayout { spacing: 6px;
+       Muted { text: "The same actions are available from the Windows tray icon."; height: 14px; }
+       HorizontalLayout { height: 28px; spacing: 6px;
+        Action { in-dialog: true; text: "Gaming plan"; icon: "play"; expand: true; ghost: true; enabled: root.tray-available; clicked => { root.pro-command("tray-gaming"); } }
+        Action { in-dialog: true; text: "Default plan"; expand: true; ghost: true; enabled: root.tray-available; clicked => { root.pro-command("tray-default"); } }
+       }
+       Action { in-dialog: true; text: root.monitoring ? "Pause monitoring" : "Resume monitoring"; icon: root.monitoring ? "pause" : "play"; expand: true; align-left: true; ghost: true; enabled: root.tray-available; clicked => { root.pro-command("tray-pause"); } }
+       Rectangle { height: 1px; background: Theme.border; }
+       Action { in-dialog: true; text: "Exit & restore Default"; icon: "close"; expand: true; align-left: true; ghost: true; danger: true; enabled: root.tray-available; clicked => { root.pro-command("tray-exit"); } }
+       Rectangle { vertical-stretch: 1; }
+       Muted { text: root.status; height: 14px; }
+      }
+      if root.modal == 8: VerticalLayout { spacing: 6px;
+       Heading { text: root.active-name; height: 24px; }
+       HorizontalLayout { height: 24px; Muted { text: root.active-guid; } GhostIcon { in-dialog: true; icon: "copy"; label: "Copy active plan GUID"; clicked => { root.action("copy-guid"); } } }
+       Muted { text: root.status; wrap: word-wrap; }
+       Rectangle { height: 1px; background: Theme.border; }
+       Muted { text: root.session-accounting-label; wrap: word-wrap; }
+       Muted { text: "Estimated savings requires an energy meter and a comparison baseline. No estimate is fabricated."; wrap: word-wrap; }
+       Rectangle { vertical-stretch: 1; }
+       HorizontalLayout { height: 28px; spacing: 6px; Action { in-dialog: true; text: "Export CSV"; icon: "export"; clicked => { root.pro-command("export-csv"); } } Action { in-dialog: true; text: "Export JSON"; ghost: true; clicked => { root.pro-command("export-json"); } } Rectangle { horizontal-stretch: 1; } }
+      }
+      if root.modal == 9: VerticalLayout { spacing: 6px;
+       Label { text: root.state-label; height: 16px; color: root.error ? Theme.warning : Theme.signal; }
+       Muted { text: root.status; wrap: word-wrap; }
+       Rectangle { height: 1px; background: Theme.border; }
+       Label { text: root.detector-label; height: 16px; }
+       Muted { text: "Process detection uses Windows WMI / Win32 APIs. No game injection, game-memory scanning or kernel driver is used for detection."; wrap: word-wrap; }
+       Muted { text: "Anti-cheat compatibility is not certified. API choice cannot guarantee that an application will avoid a game ban. Optional per-game scheduling changes are a separate feature."; wrap: word-wrap; }
+       Rectangle { vertical-stretch: 1; }
+      }
+      if root.modal == 10: VerticalLayout { spacing: 6px;
+       Muted { height: 14px; text: "Newest first · select a recorded event to inspect details"; }
+       ScrollView { vertical-stretch: 1; content-width: self.width - 12px; content-height: max(self.height, root.history.length * 34px); horizontal-scrollbar-policy: always-off;
+        for event[i] in root.history: Action { y: i * 34px; width: parent.width; control-height: 28px; in-dialog: true; text: event.label + " · " + event.detail; expand: true; align-left: true; ghost: true; clicked => { root.event-selected(i); root.modal = 11; } }
+        if root.history.length == 0: Muted { text: "No recorded transitions in this session."; horizontal-alignment: center; }
+       }
+       HorizontalLayout { height: 28px; spacing: 6px; Action { in-dialog: true; text: "Open activity log"; icon: "external"; ghost: true; clicked => { root.action("log"); } } Action { in-dialog: true; text: "Export diagnostics"; ghost: true; clicked => { root.pro-command("export-diagnostics"); } } Rectangle { horizontal-stretch: 1; } }
+      }
+      if root.modal == 11: VerticalLayout { spacing: 6px;
+       Card { vertical-stretch: 1;
+        NumberLabel { x: 10px; y: 10px; width: parent.width - 20px; height: parent.height - 20px; text: root.event-detail; font-size: 11px; wrap: word-wrap; vertical-alignment: top; }
+       }
+       HorizontalLayout { height: 28px; spacing: 6px;
+        Action { in-dialog: true; text: "All events"; icon: "left"; ghost: true; clicked => { root.modal = 10; } }
+        Rectangle { horizontal-stretch: 1; }
+        Action { in-dialog: true; text: "Export diagnostics"; icon: "export"; clicked => { root.pro-command("export-diagnostics"); } }
+        }
+      }
+      if root.modal == 4: VerticalLayout { spacing: 8px;
+       HorizontalLayout { height: 48px; spacing: 12px; Image { source: @image-url("../assets/icon.png"); width: 40px; height: 40px; image-fit: contain; } VerticalLayout { spacing: 4px; Heading { text: "Game Power Plan Switcher"; } Muted { text: "Version 2.3.6 · Native Windows desktop"; } } }
+       Muted { text: "Application source: GPL-3.0-or-later · © NN6\nRust + C++23 · Slint under GPLv3."; wrap: word-wrap; }
+       HorizontalLayout { height: 28px; Action { in-dialog: true; text: "Dependency licenses"; ghost: true; control-height: 28px; clicked => { root.action("licenses"); } } Rectangle { horizontal-stretch: 1; } }
+       Rectangle { height: 1px; background: Theme.border; } AboutSlint { }
+      }
+     }
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,23 @@
+name: Feature idea
+description: Suggest a focused improvement to Game Power Plan Switcher.
+title: "[Idea] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would this help you do?
+      description: Describe the task or friction in your current workflow.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: Explain a simple solution. Alternatives and sketches are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Hardware or other context
+      description: Optional. Mention anything the feature would depend on.

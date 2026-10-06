@@ -1,0 +1,4 @@
+# Preserve verified build-input bytes across Git checkouts.
+* -text
+*.md text eol=lf
+*.yml text eol=lf

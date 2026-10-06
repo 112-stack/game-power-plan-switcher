@@ -1,0 +1,284 @@
+Historical engineering notes for NN6 Power Plan 2.3.5 and earlier.
+Current product: Game Power Plan Switcher 2.3.6. Use README.md and RELEASE-VERIFICATION.txt for current commands and checks. Version-specific claims below remain historical.
+
+Current release: 2.3.5 (2026-10-06). See IMPLEMENTATION.txt for topology, pending command receipts, compact footer, settings and specification corrections. RELEASE-VERIFICATION.txt records the current evidence; older version-specific notes and benchmarks below remain historical.
+
+NN6 POWER PLAN NATIVE 2.3.3 PRO
+Adaptive Kinetic / Obsidian interface
+Design foundation: October 4, 2026; current revision notes below.
+
+1. ARCHITECTURAL UI/UX AND BRANDING ANALYSIS
+=========================================
+
+The 2.3.0 foundation replaced the earlier 2.1/2.2 layout and preview-only Pro
+controls. This guide retains that design background with current 2.3.3 notes.
+The current frontend is ui/app.slint. The source contract is documented in
+PRO-Features-and-Bindings.txt and user workflows in PRO-2.3-GUIDE.txt. The
+workspace-only NN6-2.3-Requirements.csv contains the historical 50-paragraph
+document audit; it is not included in the public source archive.
+Previous 2.1 and 2.2 EXE/source/report review copies remain retained. Dated older
+verification applies to its recorded binary; this guide makes no new live-pass
+claim. Current checks belong in RELEASE-VERIFICATION.txt.
+
+Version 2.3.3 groups live logical processors using Windows physical-core and
+shared-L3 relationships. Intel P/E sections require distinct efficiency classes;
+AMD sections show shared L3 domains and observed cache-size asymmetry, not proven
+CCD/CCX identities or 3D V-Cache. Unknown topology remains neutral. PDH samples
+join by Windows processor group and logical index; only authoritative hybrid
+classification enables separate P/E graph paths. The topology info dialog
+explains the actual model, counts and detection limits.
+
+The current developer dialog separates the 20px display name, 11px username and
+10px subtitle from metadata with a divider and 12px gap. Padded badges use 8px
+horizontal gaps and a narrow-layout stack. The footer uses an 8px-padded gradient
+pill, bordered avatar, distinct developer label and restrained emerald hover glow.
+
+Adaptive layout and typography
+------------------------------
+New or missing preferences default to Compact at 584 x 526 logical pixels, also
+the minimum size. Existing saved choices are preserved. Expanded is 800 x 600;
+the explicit preset button saves the choice. Width below 720px uses compact
+presentation. Outer margin is 8px, card padding 10px, section spacing 6px, and
+standard Action/NavTab/Field controls stay 28px. The native frame option exposes
+Windows caption controls/system menu/Snap; the custom frame keeps its two 14px
+red/yellow lights in a 26px capsule plus drag/resize and size preset controls.
+
+Body text is 11px, secondary at least 10px. Muted uses weight 500 and 0.2px tracking;
+eyebrow headings use weight 600 and 1px tracking. Major headings use weight 500 and
+-0.5px tracking. Numeric labels use a separately resolved monospaced Windows font
+and stable geometry. This improves legibility/jitter without claiming unsupported
+Slint OpenType tnum or blanket WCAG compliance.
+
+Overview retains compact current-plan/monitor actions, but the CPU chart grows
+from 24px Compact to 60px Expanded and adds measured paths and hover data.
+Core chips are 18px high with 4px gaps. All processors are available through one
+scrollable grid; optional heatmap fits 64 cores in Compact or 128 in Expanded,
+with additional rows scrollable. Session accounting stays observed, and event
+timeline dots open real details. The history dialog scrolls all recorded rows.
+
+Workspace adds searchable running/foreground process pickers and opt-in library
+candidate discovery. Saved game profiles can override the global Gaming plan and
+retain existing priority/affinity. Settings is divided into Power, Automation,
+Window & keys, and Integrations; it contains operational provider-backed actions.
+
+Materials, themes and interaction
+---------------------------------
+Theme owns all main-card/control/input/modal colors. Dark uses deep #1A1D24 and
+layered surfaces; Light uses #F5F5F7, white cards and #1D1D1F primary text. The
+manual theme button and Follow Windows theme operate separately. Insets and
+one-pixel highlights simulate glass; this is not OS backdrop blur or acrylic.
+Cards use 12px radius and tight shadows. Controls remain pills with radius H/2.
+
+Action/GhostIcon/NavTab use 120-150ms ease-out transitions, hover elevation and
+0.975 press compression; traffic lights scale to 1.15 on hover. Reduced motion
+makes transitions immediate. Background keyboard, pointer and accessibility
+actions are explicitly gated during dialogs. The UI shows operation errors inside
+an open modal instead of hiding them behind the blocked header. Time inputs keep
+private drafts so fresh engine snapshots cannot reset a half-typed field.
+
+Operational scope and honest telemetry
+---------------------------------------
+Power import/export/duplicate, battery/time/foreground policies, process tuning,
+tray, global shortcuts and the separate desktop HUD have real Rust/native handlers.
+The provider card explains actual sensor availability and permits Connect/Retry.
+No hardware driver or service is silently installed. Missing thermal readings
+remain unavailable. Estimated savings still requires a meter/baseline and is not
+fabricated. Native callback/file work does not block the Slint event-loop borrow.
+
+Detection uses actual Windows WMI/Win32 facilities and optional foreground events;
+there is no claim of zero CPU overhead, instant switching, app-owned ETW or
+anti-cheat certification. API duration in an event is not total detection latency.
+Close normally hides to the tray under the saved preference; explicit Exit and
+Pause retain restoration behavior. Best performance power overlay and visible
+telemetry HUD remain distinct. HUD rendering does not inject into game processes.
+
+2. FUTURISTIC SVG APP ICON AND INTEGRATION
+=========================================
+
+The original Kinetic Squircle mark places a solid emerald bolt on a softly lit
+obsidian continuous-curvature tile. Top-down ambient lighting, a restrained
+inner bevel, rim highlight and layered contact shadows create depth. Tiny
+telemetry traces and text are removed so the glyph remains readable when
+exported into small Windows icon frames.
+
+The contour is an original cubic approximation inspired by a superellipse,
+not an extracted Apple asset, an official Apple mask or a claim of exact Apple
+bounding proportions. It uses a 256-unit viewBox with a 224-unit face and a
+16-unit optical margin. BRANDING.txt documents that distinction and exports.
+
+The following is the complete editable assets/icon.svg master:
+
+--- BEGIN assets/icon.svg ---
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <title>NN6 — Kinetic Squircle</title>
+  <desc>A crisp emerald kinetic bolt on a softly illuminated obsidian squircle with a continuous-curvature silhouette, inner bevel and layered shadows.</desc>
+  <defs>
+    <!-- Original superellipse-inspired cubic silhouette; not an Apple template. -->
+    <path id="face" d="M128 16C179 16 206.18 17.82 222.18 33.82C238.18 49.82 240 77 240 128C240 179 238.18 206.18 222.18 222.18C206.18 238.18 179 240 128 240C77 240 49.82 238.18 33.82 222.18C17.82 206.18 16 179 16 128C16 77 17.82 49.82 33.82 33.82C49.82 17.82 77 16 128 16Z"/>
+    <path id="bolt" d="M154 52 87 143h35l-15 61 65-93h-35Z"/>
+    <linearGradient id="body" x1="128" y1="16" x2="128" y2="240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3F4958"/>
+      <stop offset="0.34" stop-color="#242D3B"/>
+      <stop offset="0.74" stop-color="#151C28"/>
+      <stop offset="1" stop-color="#0D131D"/>
+    </linearGradient>
+    <radialGradient id="ambient" cx="0" cy="0" r="1" gradientTransform="translate(112 19) rotate(90) scale(183 158)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D7E8F5" stop-opacity="0.16"/>
+      <stop offset="0.55" stop-color="#96BBC9" stop-opacity="0.035"/>
+      <stop offset="1" stop-color="#96BBC9" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="energy" cx="0" cy="0" r="1" gradientTransform="translate(128 124) rotate(90) scale(87)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#10A37F" stop-opacity="0.19"/>
+      <stop offset="1" stop-color="#10A37F" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="128" y1="16" x2="128" y2="240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D4E5F4" stop-opacity="0.62"/>
+      <stop offset="0.25" stop-color="#A8CED9" stop-opacity="0.17"/>
+      <stop offset="0.68" stop-color="#010609" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#05080D" stop-opacity="0.88"/>
+    </linearGradient>
+    <linearGradient id="bevel" x1="128" y1="20" x2="128" y2="236" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.2"/>
+      <stop offset="0.3" stop-color="#D0E4EB" stop-opacity="0.045"/>
+      <stop offset="0.65" stop-color="#00E5FF" stop-opacity="0.025"/>
+      <stop offset="1" stop-color="#B8DCD7" stop-opacity="0.12"/>
+    </linearGradient>
+    <linearGradient id="kinetic" x1="127" y1="52" x2="127" y2="204" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D4FFF0"/>
+      <stop offset="0.24" stop-color="#55F9BC"/>
+      <stop offset="0.58" stop-color="#00EAA0"/>
+      <stop offset="1" stop-color="#10A37F"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5" result="ambient-blur"/>
+      <feOffset in="ambient-blur" dy="5" result="ambient-shadow"/>
+      <feColorMatrix in="ambient-shadow" type="matrix" values="0 0 0 0 0.015 0 0 0 0 0.025 0 0 0 0 0.04 0 0 0 0.32 0" result="soft-shadow"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.25" result="contact-blur"/>
+      <feOffset in="contact-blur" dy="1.5" result="contact-shadow"/>
+      <feColorMatrix in="contact-shadow" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.45 0" result="near-shadow"/>
+      <feMerge><feMergeNode in="soft-shadow"/><feMergeNode in="near-shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="bolt-glow" x="-30%" y="-20%" width="160%" height="140%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+  </defs>
+
+  <!-- A 16px master-grid margin leaves space for the soft icon shadow. -->
+  <use xlink:href="#face" fill="url(#body)" filter="url(#shadow)"/>
+  <use xlink:href="#face" fill="url(#ambient)"/>
+  <use xlink:href="#face" fill="url(#energy)"/>
+  <use xlink:href="#face" stroke="url(#rim)" stroke-width="1.5"/>
+  <use xlink:href="#face" transform="translate(128 128) scale(0.965) translate(-128 -128)" stroke="url(#bevel)" stroke-width="1"/>
+
+  <!-- The single solid glyph, without tiny traces or text, survives 16px export. -->
+  <use xlink:href="#bolt" transform="translate(0 1)" fill="#000B09" opacity="0.42"/>
+  <use xlink:href="#bolt" fill="#00FF9D" opacity="0.15" filter="url(#bolt-glow)"/>
+  <use xlink:href="#bolt" fill="url(#kinetic)"/>
+  <path d="M154 52 87 143h35" stroke="#E2FFF4" stroke-opacity="0.38" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>
+--- END assets/icon.svg ---
+
+The application source is under ui/, so Slint's relative image path is:
+
+    export component AppWindow inherits Window {
+        icon: @image-url("../assets/icon.png");
+        // The complete component is implemented in ui/app.slint.
+    }
+
+Use @image-url("assets/icon.png") only if assets/ is beside the .slint file.
+No Rust runtime icon setter or path lookup is needed: Slint embeds the PNG.
+Windows Explorer/taskbar resources use native/app.rc:
+
+    1 ICON "assets/NN6.ico"
+
+build.rs tracks icon.svg, icon.png and NN6.ico with cargo:rerun-if-changed.
+After exporting assets, rebuild and relaunch the EXE to update both its native
+resource and its running window icon. Explorer can cache artwork for a stable
+EXE path; a changed-item shell notification can refresh that specific item
+without restarting Explorer or deleting the system icon cache.
+
+Provided exports
+----------------
+assets/icon.png       512 x 512 RGBA, embedded Slint icon.
+assets/icon-1024.png  1024 x 1024 RGBA preview/export.
+assets/NN6.ico        16, 20, 24, 32, 40, 48, 64, 128 and 256px PNG frames.
+assets/NN6.icns       16, 32, 64, 128, 256, 512 and 1024px PNG frames.
+
+ICNS is an artwork export only; this application still targets Windows x64.
+The assets/ directory is the authoritative branding set. Obsolete WPF sources
+and icons are no longer distributed alongside the latest native deliverable.
+The previously installed hidden monitor is preserved until explicit handover.
+
+Reproducible export commands, from this source directory with Node.js installed:
+
+    npm install --no-save --package-lock=false sharp@0.35.4
+    node tools/export-icons.mjs
+
+Each ICO size is rendered directly from the SVG; the exporter downloads no
+artwork. The original workstation can use the already staged runtime through
+work/Build-NativeBranding.ps1 from the workspace root.
+
+
+3. COMPLETE ui/app.slint SOURCE
+==============================
+
+The full executable frontend is ui/app.slint, compiled by build.rs. Keep assets/,
+native/, src/, Cargo.toml and Cargo.lock together. The combined
+NN6-2.3.5-Complete-Source.txt release export is generated from the current source
+files and supplied beside the public source ZIP.
+Action, NavTab, GhostIcon, Field, Light, Card, Badge, ToggleRow, MetricPill and
+SectionTab retain their component names. AppWindow preserves existing bindings;
+Theme/Shortcuts/row structs and the actual AboutSlint widget remain intact.
+TelemetryHud is a separate compact no-frame Window with measured text bindings.
+
+Slint 1.18.1 uses transform-scale and drop-shadow-*; scale and WPF effects are not
+valid substitutions. Path fit:fill maps the 600x100 chart paths. This version has
+no stroke-dasharray, so separate segments/rectangles form dashed marks. ScrollView
+uses content-width/content-height. Standard Slider retains keyboard/focus/drag.
+
+Build/test instructions are in README.txt and Build.ps1. In this workspace:
+    & work/Build-Native.ps1 -Action test
+    & work/Build-Native.ps1 -Action build -Release
+
+4. UPDATED src/ui.rs CONTROLLER LOGIC
+====================================
+
+src/ui.rs binds immutable engine snapshots to Slint and retains the bounded IPC
+writer and Slint/winit 0.30 adapter. src/ui_pro.rs supplies appearance, native tray,
+shortcuts, export/provider/HUD and additive callback handling. src/pro_view.rs
+computes measured CPU paths and observed session accounting. preferences.rs saves
+appearance.json; automation.rs implements validated policy, and system_integration.rs
+is the checked native integration boundary. The binding reference lists every
+public field and command; no declaration alone implies an operational capability.
+
+CPU PDH samples are keyed by processor group and logical index. Nominal sampling
+is once per second for visible foreground Overview or an enabled HUD, subject to
+fullscreen suspension. Pausing power monitoring does not disable real CPU samples.
+Warm-up/missing/unreadable/disconnected samples invalidate old percentages rather
+than inventing zero. Samples are interval activity, not game core ownership.
+
+The graph is a trailing 30-second total trend with missing-data gaps; classified
+Intel hybrid processors additionally show measured P/E paths. Hover
+returns timestamp, observed loads and plan metadata. Plan markers exclude Windows
+power-overlay events. Gaming/Default session totals use monotonic observed time;
+unknown plans and disconnected periods are excluded. The event model holds actual
+source/target, cause, available PID/process, account and power API duration. Older
+metadata remains explicitly unavailable. Event detail/export uses its recorded row.
+
+New callbacks layout-mode(bool), graph-hover(float), event-selected(int) are
+additive. pro-setting/pro-command/power-tool now route validated real operations.
+Per-game plan-kind 2 includes the global-default choice and returns to profile
+editing before Save commits it. Sensor availability is updated from actual local
+provider responses; retry remains enabled without readings. Energy savings remains
+unavailable. Hotkey status reflects registration success/conflict, not capability.
+
+Modal isolation, literal selector filtering, Up/Down/Enter/Escape, and saved-GUID
+selection remain intact. Footer links keep the verified Discord native URL with
+HTTPS fallback, copied HTTPS link and Twitch profile; no numeric-ID field exists.
+Profile information is an embedded public snapshot, not live synchronization.
+
+Windows drag/resize uses the pinned winit_030 adapter to preserve pointer release.
+The native-frame preference delegates caption/Snap behavior to Windows. Tray
+Close hides only when configured/available; Exit performs normal restoration.
+Recheck presentation behavior when upgrading Slint/winit. Detailed implementation
+and verification evidence are separate; no unexecuted live test is claimed here.

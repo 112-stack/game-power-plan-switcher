@@ -1,0 +1,45 @@
+name: Bug report
+description: Something is not working as expected.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check existing issues first. For security vulnerabilities, follow SECURITY.md instead of posting sensitive details here.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      placeholder: 2.3.6
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Windows and hardware
+      description: Windows version, CPU and GPU. Add DPI/monitor details for layout issues.
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Run mode
+      options:
+        - Normal app
+        - Dry-run preview
+        - Build or test harness
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: What happened?
+      description: Include the steps, expected result and actual result. Mention relevant monitoring or tray settings.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots or a short log excerpt
+      description: Optional. Remove account names, private paths, tokens and unrelated process details before sharing. Do not upload full unreviewed diagnostics.

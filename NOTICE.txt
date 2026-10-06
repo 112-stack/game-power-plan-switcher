@@ -1,0 +1,49 @@
+Game Power Plan Switcher 2.3.6
+Previously released as NN6 Power Plan Native
+Copyright (C) 2026 NN6
+SPDX-License-Identifier: GPL-3.0-or-later
+
+The original NN6 application source in this release is free software: you can
+redistribute it and/or modify it under the terms of the GNU General Public
+License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See LICENSE.txt for the full GNU GPL terms.
+
+No additional restriction on running, modification, rebranding or distribution
+is imposed by this NOTICE. Preserve applicable legal notices and identify
+modifications as the license requires. CITATION.cff supplies optional attribution
+metadata; academic citation or an external link is not mandatory for ordinary use.
+TRADEMARK.md addresses accurate identification and endorsement separately.
+
+Prior copies and portions released under MIT remain available under those grants.
+LICENSE-MIT-HISTORY.txt preserves the previous notice verbatim, including its
+historical WPF/PS2EXE references. Those references describe the older deliverable;
+this native app uses neither WPF nor PS2EXE. This release does not revoke prior
+permissions. Keep upstream notices for any reused MIT-licensed portions.
+
+This release selects Slint 1.18.1's explicitly offered GPL-3.0-only alternative.
+The combined distribution is conveyed under GPL version 3. NN6's own source
+grant remains GPL-3.0-or-later. AboutSlint remains in the About dialog. Dependencies
+retain the licenses recorded in THIRD-PARTY-NOTICES.txt. Their files are not
+relicensed by this notice. Game artwork and the supplied developer avatar are
+third-party/source-supplied assets; no ownership of their underlying content is
+claimed. Replace them with assets you have redistribution rights to if required.
+
+Optional NVIDIA NVML and AMD ADL interfaces use the user's installed graphics
+driver. No proprietary driver DLL or vendor hardware-monitoring service is
+supplied by this source package. The dependency inventory/notices describe the
+actual wrapper and other libraries included in the build. Sensor support does
+not imply endorsement or certification by NVIDIA or AMD.
+
+The license text was copied verbatim from the pinned upstream Slint 1.18.1
+GPL-3.0-only.txt distribution of the Free Software Foundation's GPLv3. The
+application grant above expressly permits version 3 or any later version.
+Canonical license: https://www.gnu.org/licenses/gpl-3.0.html
+Developer profile: https://discord.com/users/176078095957098497
+
+These project notes summarize intended licensing and are not legal advice.
+Before a public distribution, confirm ownership/contributor permissions and
+the rights for every redistributed asset and dependency.

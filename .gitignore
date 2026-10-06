@@ -1,0 +1,24 @@
+/target/
+*.pfx
+*.p12
+*.key
+*.pem
+native-settings.json
+appearance.json
+native.log
+native-crash.txt
+native-startup-error.txt
+/native-live-*/
+/native-live-results.json
+/native-live-wrapper.json
+
+# Keep release binaries, local caches and editor state out of Git.
+*.exe
+*.dll
+*.pdb
+*.zip
+/node_modules/
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,40 @@
+Historical engineering notes for NN6 Power Plan 2.3.5 and earlier.
+Current product: Game Power Plan Switcher 2.3.6. Use README.md and RELEASE-VERIFICATION.txt for current commands and checks. Version-specific claims below remain historical.
+
+NN6 POWER PLAN NATIVE 2.3.5 — SOURCE REVIEW
+2026-10-06
+
+Scope
+The current Rust modules, C++ Windows bridges, Slint components and public
+callbacks, engine policy and recovery, GUI singleton, IPC/shared telemetry,
+sensors and CPU topology, session exports, build configuration and resources
+were inspected. The user requested a full review, including existing defects.
+The final focused repairs received a separate read-only review.
+
+Findings and disposition
+1. Preview isolation: the old GUI connected to an existing production engine
+   before considering --dry-run. Normal preview settings also shared production
+   storage. Repaired with one immutable runtime scope for data and endpoints,
+   checked initial handshake, and later snapshot/shared-memory mode validation.
+   Production names and the real shared monitor lock remain compatible.
+2. Disconnected session exports: repeated exports could classify disconnected
+   elapsed time using a retained plan snapshot. Repaired by advancing exports
+   with Unknown while disconnected, and resuming accounting from a real observed
+   reconnect. The retained history itself is not fabricated or discarded.
+3. During repair review, the shared-memory telemetry payload was found to omit
+   the dry-run flag. Its constructor now preserves that flag, with a serialized
+   payload regression covering real and preview modes.
+
+Structure
+The existing engine/GUI/guardian separation and module boundaries are retained.
+runtime_scope.rs centralizes preview/test naming and paths; ipc::begin_session
+centralizes the pre-command handshake. The TrafficLights component now exposes
+show-minimize so identity dialogs share the visual style without a window-level
+minimize action. No unrelated architectural rewrite or dependency was added.
+
+Result
+No blocking code findings remain after the targeted re-review. The preview
+documentation was updated to describe path/mode isolation and the engine file
+lock when the same test data root is deliberately reused. This review does not
+certify every hardware configuration or prove absence of all possible defects.
+RELEASE-VERIFICATION.txt records actual final build, tests and desktop evidence.

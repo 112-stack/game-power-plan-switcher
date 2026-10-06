@@ -1,0 +1,84 @@
+Game Power Plan Switcher 2.3.6 — release verification
+2026-10-06
+
+Exact executable
+Game-Power-Plan-Switcher-2.3.6.exe
+17,162,240 bytes
+SHA-256: 67bf874cd93f736980906c3d3d40ac9f9901b184607bee2bd3275c7c7eaf95a6
+Unsigned Windows x64 GNU-LLVM release. Embedded commit: unknown; build UUID:
+not-supplied. A later Git tag does not retroactively change binary provenance.
+
+Scope
+This release changes the public product name from NN6 Power Plan to Game Power
+Plan Switcher, executable/build metadata, current documentation and screenshots.
+NN6 authorship, GPL terms and historical notices remain. Compatibility data,
+startup, IPC, mutex, recovery and diagnostic identities retain their NN6 names.
+The separate GUI, daemon and guardian remain separate.
+
+Checks run for these exact sources and executable
+- Rust 1.99.0 / edition 2024, Slint 1.18.1, C++23, LLVM-MinGW UCRT 20260922,
+  x86_64-pc-windows-gnullvm: release build completed without warnings.
+- 124 automated tests passed; zero failed; one intentional live CPU-load probe
+  was ignored. This is a fresh run, not the older 2.3.5 result.
+- Nine isolated kernel singleton/pipe checks passed, including 30 concurrent
+  probe launches selecting one owner and forwarding the other 29 requests.
+  These checks exercise the shared GUI singleton implementation without creating
+  30 Slint renderers or starting power monitoring.
+- Seven read-only integrity checks passed: exact-file verification, wrong digest,
+  malformed manifest and appended-byte rejection, Windows diagnostic inspection,
+  independent SHA-256 and PE mitigation checks. ASLR, NX and high-entropy VA
+  flags are set. Complete CFG or cross-language LTO is not claimed.
+- All nine embedded Windows icon frames match assets/NN6.ico byte for byte.
+  VERSIONINFO reports FileVersion and ProductVersion 2.3.6.0. The original
+  Kinetic Squircle art remains; only the SVG's descriptive title changed.
+- An independent review found no concrete behavioral regression in the rename.
+  The engine policy, recovery, IPC, runtime scope, telemetry implementation and
+  startup registration were unchanged. Public Slint controller bindings remain.
+
+Observed desktop/UI checks
+- The paused 2.3.5 application exited through its normal Exit command; no forced
+  termination was used. The new production executable opened with --start-paused.
+- The full product name fit the Compact 584x526 and Expanded 800x600 headers.
+  The Compact About dialog displayed the new name/version, retained AboutSlint,
+  and dismissed using its red close control. Maintainer identity, subtitle and
+  red-only dismiss control were checked in Compact.
+- Expanded Overview, Workspace and Settings were inspected. New unedited JPEG
+  screenshots were captured with the desktop pointer outside the app window.
+  CPU and NVIDIA readings were real observations at capture time; unsupported
+  CPU/package temperatures remained unavailable. Monitoring stayed paused.
+- The desktop shortcut now reads Game Power Plan Switcher (latest), targets this
+  exact executable and uses the current ICO. Its saved target/icon were read back.
+- Appearance and native-settings file hashes were identical before and after the
+  UI checks. Balanced remained active; the original scheduled GamePowerPlan
+  monitor remained running. No startup handover or plan definition was changed.
+- The app was left on paused Expanded Overview.
+
+Documents and source
+The renamed Overview PDF contains 2 pages; the Full Guide PDF contains 12 pages.
+All 14 final PDF pages were rendered and inspected. DOCX packages passed structural
+checks; Word pagination is unverified because the bundled LibreOffice executable
+was unavailable. Historical 2.3.5 engineering notes are marked historical.
+
+The release packaging checks the 41 frozen compiled inputs against the canonical
+source and public source tree. The embedded third-party notice is retained byte
+for byte. The companion dependency ZIP contains 348 checksum-verified cached
+crate archives from 565 indexed registry packages; 217 uncached archives have
+upstream URLs in DEPENDENCY-SOURCES.json. It is not a complete offline vendor tree
+or a bit-for-bit reproducible-build guarantee.
+
+Limits
+This naming patch does not claim a new RAM/CPU benchmark, GPU-profiler result,
+sub-millisecond lifecycle guarantee, physical AMD/ARM validation, multi-DPI/AAA
+certification, real plan-switch/startup/UAC/battery/guardian-crash exercise or
+new HUD-destruction capture. Older 2.3.5 dry-engine/fullscreen observations remain
+historical and are not repeated as 2.3.6 tests. Transitional Taking control/Applying
+header states were not visually induced. No signing, anti-cheat certification,
+FPS improvement, energy-saving estimate or legal/GitHub approval is implied.
+
+Publication
+Repository: https://github.com/112-stack/game-power-plan-switcher
+This publication starts from a fresh main root and distributes 2.3.6 only.
+Earlier Git history, tags and release downloads are not included. Historical
+engineering and test observations above remain version-specific records.
+Use the current release's checksums for 2.3.6; do not substitute a historical
+executable hash. The repository reset does not change the verified EXE bytes.

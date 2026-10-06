@@ -1,0 +1,296 @@
+Historical engineering notes for NN6 Power Plan 2.3.5 and earlier.
+Current product: Game Power Plan Switcher 2.3.6. Use README.md and RELEASE-VERIFICATION.txt for current commands and checks. Version-specific claims below remain historical.
+
+Current release: 2.3.5 (2026-10-06). See IMPLEMENTATION.txt for topology, pending command receipts, compact footer, settings and specification corrections. RELEASE-VERIFICATION.txt records the current evidence; older version-specific notes and benchmarks below remain historical.
+
+NN6 POWER PLAN NATIVE 2.3.3 — PRO BINDINGS AND BEHAVIOR
+Rust 2024 / C++23 / Slint 1.18.1
+
+This is a source/contract reference, not a verification report. Read
+PRO-2.3-GUIDE.txt for usage and README.txt for build/recovery. The workspace-only
+NN6-2.3-Requirements.csv contains the historical 50-paragraph document audit;
+it is not included in the public source archive.
+Previous 2.1 and 2.2 review outputs remain retained for manual review.
+
+CURRENT OPERATIONAL SCOPE
+
+Existing monitoring, named-plan switching, current-plan verification, startup,
+exact legacy handover, IPC ownership and recovery remain operational. The 2.3
+policy additionally supports optional foreground eligibility, battery guard,
+local-time gating, per-game plan overrides and process-tuning master control.
+Default process semantics remain any matching watched process, not Steam App ID.
+
+Explicit power tools import/export .pow, duplicate a selected plan, and open
+Windows advanced settings. Native tray, close-to-tray, start-minimized, global
+shortcut registration, theme sync, native frame, process picker and session
+exports now have real handlers. The desktop telemetry HUD uses a separate native
+window without injecting into games. These are no longer UI-only previews.
+
+Sensor readings are conditional: persistent NVIDIA NVML / supported AMD ADL8
+PMLog readers supply independent GPU temperature/utilization/fan percentage/RPM
+values, nominally every two seconds while visible/HUD-enabled. A separate bounded
+ten-second WMI worker can read CPU/package/board values and GPU fallback from
+existing LHM/OHM providers. Explicit Retry can bypass the cadence; no provider or
+driver is installed. Missing values remain unavailable; measured zero is valid.
+The WMI schema does not expose acquisition timestamps and can be externally
+cached. Selected GPU identity/provenance is retained; partial GPU readings are
+not combined with another adapter. No energy meter/baseline is implemented.
+
+CPU PDH sampling is nominally one second while foreground Overview is visible,
+or the optional HUD requests samples. Fullscreen suspension and missing telemetry
+invalidate stale CPU readings. P/E/total paths use fresh timestamped samples in a
+30-second window; missing intervals are gaps. Actual measured zero stays zero.
+Values measure interval busy time, not instantaneous process-to-core ownership.
+
+Session totals use this GUI window's observed active-plan intervals and monotonic
+elapsed time. Unknown plans/disconnected periods are excluded. External changes
+while the detector is paused are not independently audited. Timeline records up
+to 64 events; new events contain captured source/target, available process/PID,
+engine Windows account and power API duration. Missing legacy metadata says so.
+Duration is not total detection latency. All events are scrollable/clickable.
+Session export JSON schema 2 adds current_state; CSV includes a state row and
+status/error/backend/automation/current-plan columns. Dedicated diagnostic JSON
+also includes selected-event detail and the last 64 KiB of native.log with explicit
+truncation/read-error metadata. The controller calls diagnostic_json on its worker;
+no unbounded log read runs on the Slint event loop. Account/process/plan names may
+appear in exported data; old failures outside the retained tail are not guaranteed.
+
+PUBLIC INTERFACE COMPATIBILITY
+
+GameRow, CoreRow, HistoryRow, AppWindow, Theme and Shortcuts retain existing names
+and fields. Existing callback/property names are preserved. Slint property names
+use hyphens; Rust-generated accessors use underscores. Old core-page/core-pages
+remain for compatibility, but the visible grid now scrolls all processors.
+AboutSlint remains intact. New fields are additive.
+
+TOPOLOGY PRESENTATION CONTRACT (2.3.3)
+cpu-vendor / cpu-model         string; CPUID identity, explicit unknown fallback
+topology-summary/detail        string; model/counts, source and limitations
+p-core-count / e-core-count    int; classified physical cores, SMT counted once
+is-hybrid                     bool; Intel with distinct Windows efficiency classes
+has-l3-groups                 bool; verified AMD shared L3 mappings available
+l3-groups                     [int]; shared L3 domain ID per displayed core row;
+                              -1 when unavailable, not a Windows group or CCD ID
+has-ccx                       bool; reserved compatibility input, remains false
+ccx-groups                    [int]; reserved compatibility mapping, all -1;
+                              no invented CCX IDs are exposed
+core-sections                 [CoreSection]; contiguous ranges in cores model
+core-rows-8/12/16              int; cached sum of section grid rows per column count
+
+CoreRow adds class:string; P or E only for justified Intel classes, otherwise C.
+LP-E and CCX labels are not inferred from efficiency/cache size. Existing label,
+fill, activity and detail fields remain intact. CoreSection has title/detail/class,
+start/count and rows-8/rows-12/rows-16 cumulative row offsets. All names are additive.
+Section IDs are presentation identifiers, distinct from Windows processor groups.
+
+src/cpu_topology.rs calls GetLogicalProcessorInformationEx once during startup.
+It reads active physical-core masks, EfficiencyClass and shared L3 relationships;
+standard Rust CPUID intrinsics supply identity only. It does not pin threads,
+alter scheduling, or rely on CPUID 0x8000001E as a universal AMD CCD/CCX decoder.
+AMD asymmetric L3 is reported as observed cache size differences, never proof of
+physical CCD count or 3D V-Cache. PDH data joins by (Windows group, logical index).
+Missing topology or ambiguous cache mappings retain neutral/unavailable states.
+system_integration::cpu_topology() exposes the read-only result; --topology-probe
+<absolute.json> exports it without starting a GUI/engine or changing power/startup.
+No additional topology crate was needed; nvml-wrapper remains pinned to 0.13.0.
+
+DISPLAY INPUTS
+Name                          Type / unit or meaning
+cpu-trend-path                string; total path, viewBox 600 × 100
+cpu-p-trend-path               string; P-class path, same coordinates
+cpu-e-trend-path               string; E-class path, same coordinates
+cpu-switch-path               string; actual plan-change markers, not overlay
+cpu-trend-label               string; sampling/availability text
+cpu-trend-available           bool; a real drawable trend exists
+session-gaming/default        string; formatted observed durations
+session-gaming-ratio          float 0..1; compared observed duration ratio
+session-donut-path            string; arc in 32 × 32 viewBox
+session-accounting-label      string; accounting scope
+energy-savings                string; unavailable/measurement explanation
+energy-savings-available      bool; false without real meter/baseline
+process-status-available      bool; known running flags are meaningful
+ games-running               [bool]; aligned with paginated games model
+ detector-label               string; actual Windows detector mode
+ graph-tooltip                string; sampled time, total/P/E values and plan
+ provider-status              string; actual sensor/provider result
+ hotkey-status                string; actual registered/conflict result
+ candidate-source             string; running/library picker heading
+ event-detail                 string; selected actual event metadata
+ game-plan-name               string; selected profile override/global default
+ ui-font / mono-font          string; selected Windows font families
+ cpu-temp / gpu-temp          float Celsius; -1 unavailable
+ cpu-package-watts            float Watts; -1 unavailable
+ fan-rpm                      float RPM; -1 unavailable
+ gpu-utilization              float percent; -1 unavailable
+ gpu-fan-percent/gpu-fan-rpm   independent float units; -1 unavailable
+ cpu/gpu/power/fan-sensor-provider string; per-metric provenance/selected device
+
+Sensor display requires sensors-available and individual value>=0. CPU 75/90°C
+and GPU 75/85°C tint thresholds are display cues, not manufacturer-specific
+thermal protection. Availability must not be inferred from plausible numbers.
+
+CAPABILITY FLAGS
+All default false in Slint and are assigned by the actual controller:
+sensors-available, power-tools-available, tray-available, automation-available,
+visual-overlay-available, hotkeys-available. A true hotkey capability permits
+registration attempts; it does not mean the selected chord registered. Read
+hotkey-status for results. Connect sensors stays enabled when readings are absent.
+elevated-plan-retry is an additional bool display input (default false). It shows
+Retry with Windows approval only after a privilege-denied plan-file operation.
+pro-command("retry-elevated") retries the controller's retained exact operation;
+monitoring remains unelevated and no automatic elevation occurs. See the release
+report for elevated-path verification status.
+
+PERSISTED APPEARANCE / SHELL PREFERENCES
+Slint in-out fields are populated from appearance.json by src/preferences.rs.
+Runtime defaults may intentionally differ from defensive Slint initial values.
+
+compact-mode        bool; new/missing default true=>584x526; false=>800x600;
+                    existing saved choice is preserved
+ dark-mode          bool; default true; ignored when system sync is active
+ sync-system-theme  bool; default true; follow Windows app color preference
+ native-frame       bool; default false; OS frame replaces custom caption lights
+ heatmap-view       bool; default false; dense 8x8/16x8 heatmap versus core labels
+ auto-discover      bool; default false; opt-in candidate discovery
+ minimize-to-tray   bool; runtime default true; Close hides to tray
+ start-minimized    bool; default false; launch hidden to available tray
+ global-hotkey      string; runtime default Ctrl + Alt + P; blank disables
+ visual-overlay-enabled bool; default false; separate desktop HUD
+ overlay-position   int 0..3; TL,TR,BL,BR; runtime default 1 (top-right)
+ overlay-opacity    float 0..100 percent; runtime default 80; step1
+ overlay-hotkey     string; runtime default blank (unregistered)
+
+Application shortcuts require a modifier and supported key. Ctrl/Alt/Shift/Win
+plus A-Z,0-9,F1-F24 except reserved F12, Space, Enter, Home/End/PgUp/PgDn are
+validated by the parser. The two shortcuts must differ. Apply reports conflicts.
+Ctrl+Alt+P is a manual plan toggle; Ctrl+Enter inside NN6 toggles monitoring.
+Manual selection clears on pause/resume or next game lifecycle. Battery guard
+still takes precedence. Close-to-tray keeps the engine available; explicit Exit
+restores Default and changed scheduling. See recovery limits in README.txt.
+
+ENGINE POLICY FIELDS
+ auto-switch-battery => Config.battery_guard Option<bool>
+ auto-apply-affinity => Config.auto_affinity Option<bool>
+ foreground-only    => Config.foreground_only bool (default false)
+ auto-time-rule     => Config.time_rule bool
+ automation-start/end => Config.time_start/time_end HH:MM local time
+ per-game plan-kind 2 => Game.power_plan string (empty uses global Gaming)
+
+The affinity master is labeled Auto-apply process tuning because it governs
+saved affinity AND priority. It has no unused global policy text field. The
+retained automation-affinity property is compatibility-only and not displayed.
+Time inputs use private drafts; Apply copies them into the public fields and
+validates through Rust. Fresh snapshots cannot overwrite half-typed inputs.
+Time rules gate game eligibility rather than creating a running-game state.
+Battery guard selects Default on DC or unknown source. First matching saved
+profile decides the target when several eligible games are running.
+Failed policy application retains a retry while battery/time policy is enabled;
+the next bounded five-second tick retries even if source/time is unchanged, then
+success clears the flag. With both rules disabled, the existing event-driven
+failure recovery waits for another event or action. Settings and imported profiles
+share configure preflight, dirty-restoration rejection and rollback paths.
+
+NAVIGATION FIELDS
+page 0/1/2: Overview/Workspace/Settings.
+settings-section 0/1/2/3: Power/Automation/Window&keys/Integrations.
+automation-expanded -1 collapsed;0 Battery;1 process tuning;2 Time.
+modal 11 is event details; existing dialog IDs remain unchanged.
+modal 12 is read-only CPU topology detail, opened from the Live CPU info button.
+plan-kind 0 Gaming,1 Default,2 per-game override; -1 closed. The controller adds
+Use global Gaming plan as a normal indexed choice for role 2. Selection returns
+to profile modal 3; Save profile commits the pending plan/scheduling settings.
+
+CALLBACKS AND COMMAND IDS
+Existing action/search/navigation/selection/window callbacks remain unchanged.
+New callbacks:
+ layout-mode(bool): resize to explicit preset and save preference
+ graph-hover(float): normalized x 0..1; -1 clears tooltip
+ event-selected(int): newest-first event index; populate detail modal 11
+
+power-tool(int,string): role 0 Gaming / 1 Default; operation export/duplicate/advanced.
+Mutating plan tools are capability/ownership gated. Native file pickers choose
+paths; background jobs perform file/plan work without blocking GUI callbacks.
+
+pro-setting(string):
+ theme, sync-theme, native-frame, heatmap, auto-discover, foreground-only,
+ battery, affinity, time, close-to-tray, start-minimized, global-hotkey,
+ visual-overlay, overlay-layout.
+The controller reads corresponding current fields, validates and persists them.
+The theme toggle disables system sync. Overlay Apply saves corner/opacity/chord.
+Automation/tray mutation toggles require non-observer ownership. HUD Apply needs
+visual-overlay-available and hotkeys-available.
+
+pro-command(string):
+ running-processes, foreground-process: populate searchable reviewed candidates;
+ foreground uses the last external foreground app observed by NN6
+ connect-sensors: query/retry existing local provider
+ import-plan: native .pow file picker and import
+ export-csv, export-json: observed-session exports
+ export-diagnostics: diagnostic JSON with current state/error, selected event,
+ session/history and bounded native.log tail; missing/truncated log is explicit
+ tray-gaming, tray-default: real manual plan selection
+ tray-pause: real monitoring toggle, caption Pause/Resume reflects current state
+ tray-exit: normal app exit/restoration
+
+EXPORTED TELEMETRYHUD WINDOW
+Separate no-frame 220 × 72 Slint Window; public in string plan-name/cpu-text/sensor-text
+and in float alpha 0..1. Rust supplies measured values and configures native
+Windows topmost/click-through position and opacity. The HUD is distinct from the
+Windows best-performance power overlay. No game-memory access or game hook is
+used to draw it. It does not promise display over every exclusive fullscreen game.
+Disabling aborts pending setup and drops the component/native adapter. Enabling
+creates it lazily and awaits Winit HWND readiness before native positioning.
+The main window retains its renderer and may retain a cached GPU surface while
+hidden, but visible model/chart work and decorative animation are suspended.
+Stable VecModels and changed-row updates introduced in 2.3.2 remain in use.
+
+GUI SINGLETON AND TRAY NOTICE
+The GUI-only per-user/session Global mutex is acquired before Slint initializes;
+the engine/guardian ownership remains separate. Duplicate requests queue SHOW
+onto the owner event loop. notify_already_running() queues an optional native
+tray balloon using the existing registered icon, at most once per five seconds.
+Quiet time and notification suppression are respected; the notice is silent and
+real-time only. Ok means queued, not displayed. No icon is created for a notice.
+
+DEVELOPER PROFILE
+The identity block, 12px separator gap and padded badges are separate layouts.
+Metadata uses 8px horizontal spacing or a conditional 6px-gap vertical layout;
+no unsupported FlowLayout is used. The 8px-padded footer pill has gradient/hover
+states, bordered avatar and distinct name/developer text. Public snapshot and
+Discord/Twitch callbacks are unchanged; no numeric ID configuration was added.
+
+LAYOUT / FOCUS / ENGINE CONSTRAINTS
+Expanded 800 × 600; Compact 584 × 526; minimum 584 × 526. 8px outer margin,6px section gaps,
+10px card padding. Main controls 28px, secondary text>=10px. CPU card 192px compact/
+244px expanded; chart 24/60; chips 18px with 4px gaps. Heatmap has 8/16 columns;
+section headers and higher core counts scroll. Content uses Slint 1.18 content-width/content-height,
+not deprecated viewport names. No horizontal scrollbars are required.
+
+Theme owns dark/light colors and fonts. Light uses #F5F5F7 canvas, white cards,
+#1D1D1F text. Actual OS font selection is not an unsupported OpenType tnum claim.
+Focus, pointer and accessibility actions explicitly gate background controls
+while a modal is open; disabling an outer FocusScope alone is insufficient.
+AboutSlint and the version-pinned winit 0.30 drag/resize adapter remain intact.
+
+Slint 1.18.1 supports transform-scale, drop-shadow-* and linear/radial gradients.
+Path lacks stroke-dasharray; separate M/L segments/rectangles provide dashes.
+Path fit:fill maps the 600x100 telemetry paths into the resized graph. Standard
+Slider supplies keyboard, pointer, clamping and focus behavior. Finite hover/
+reveal transitions respect reduced motion; no hidden decorative endless pulse.
+
+DETECTION WORDING
+The badge reports actual WMI/Win32 compatibility or trace operation plus the
+optional foreground hook. This is not an app-owned ETW session. Detection does
+not inject into games or scan their memory. Process tuning is a separate optional
+Windows scheduling mutation. There is no EAC/BattlEye/Vanguard certification or
+ban guarantee, and event-driven callbacks do not establish zero CPU overhead.
+
+Primary technical references (also checked against pinned local Slint sources):
+https://learn.microsoft.com/en-us/previous-versions/windows/desktop/krnlprov/win32-processstarttrace
+https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwineventhook
+https://docs.slint.dev/latest/docs/slint/reference/elements/path/
+https://docs.slint.dev/latest/docs/slint/reference/std-widgets/basic-widgets/slider/
+https://docs.slint.dev/latest/docs/slint/reference/language/animations/
+https://www.battleye.com/support/faq/
+https://support.riotgames.com/en-us/riot/events/third-party-applications
+https://www.easy.ac/support/articles

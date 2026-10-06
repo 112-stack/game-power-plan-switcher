@@ -1,0 +1,168 @@
+Historical engineering notes for NN6 Power Plan 2.3.5 and earlier.
+Current product: Game Power Plan Switcher 2.3.6. Use README.md and RELEASE-VERIFICATION.txt for current commands and checks. Version-specific claims below remain historical.
+
+NN6 POWER PLAN NATIVE 2.3.5 — IMPLEMENTATION DECISIONS
+
+PATCH REVIEW
+Maintainer and About retain only the red dismiss action. Main-window minimize
+remains available. A full source review retained the existing architecture and
+identified preview IPC/data isolation and disconnected-export accounting defects;
+both receive focused repairs and regression checks. See RELEASE-VERIFICATION.txt
+for actual final test and UI evidence.
+
+2026-10-06
+
+This document maps the consolidated specification to supported implementation.
+RELEASE-VERIFICATION.txt records actual results separately. Targets are not tests.
+
+ENGINE, POWER AND IPC
+The native engine already subscribes to Win32_ProcessStartTrace/StopTrace and
+foreground/window-size WinEvents. If the ordinary Windows account cannot access
+trace events, it uses intrinsic WMI creation/deletion subscriptions WITHIN 1 and
+direct waits on known process handles. A Toolhelp snapshot seeds/reconciles state;
+there is no five-second Toolhelp process-poll loop to replace. Optional battery,
+time and retry policy checks are separate from lifecycle detection.
+
+The event architecture does not guarantee sub-millisecond delivery, zero idle
+wakeups or a particular CPU C-state. A provider fallback can take around a second
+to detect starts. The diagnostics report measured end-to-end observations, not
+kernel callback latency. No ETW session requiring extra privileges is installed.
+Native C++23 bridges are AOT code, not C++ module units or an allocation-free claim.
+Rust has no tracing GC, but the app uses owned strings, vectors and channels.
+
+PowerGetActiveScheme is checked before PowerSetActiveScheme in the serialized
+engine; an already-active GUID does not generate another plan write. The guardian,
+daemon and GUI remain independent. Recovery journals and ownership locks stay in
+place. No installed plan definition is rewritten for this UI revision.
+
+The early GUI mutex retains its SID/session/dry-run/test-directory scope under
+the Global namespace. Do not replace it with an unscoped cross-user constant.
+Duplicates use bounded authenticated SHOW IPC and the existing tray notice.
+The eight-slot memory-mapped telemetry ring and named-pipe protobuf messages
+remain: protobuf encoding/decoding copies bytes, so this is not zero-copy.
+
+Additive per-client command receipts correlate pending configuration/handover UI
+with actual engine completion. An unrelated broadcast cannot indicate success.
+The existing configure transaction validates, pauses/restores, saves and resumes.
+It retains the old configuration on validation failure and attempts rollback if
+saving/restarting fails; a rollback write failure is explicitly reported, not
+presented as successful restoration. No blind optimistic change or separate
+uncorrelated pause command is required. Unknown completion is reported. Bulk and
+profile drafts remain until their matching successful receipt; errors/timeouts
+retain the input, and completion does not discard a newer local edit.
+
+RENDERER AND RESOURCES
+Slint stays pinned to 1.18.1, winit 0.30 accessors and FemtoVG OpenGL. This is not a
+new DirectComposition renderer or a guaranteed 144 Hz mode. Hidden/fullscreen
+gating suppresses application model/render animation work. Foreground window
+bounds are a fullscreen heuristic, not proof of exclusive DirectX presentation.
+Slint/driver/DWM can retain resources; 0% GPU allocation/utilization is not asserted.
+Monitored-fullscreen suspension also gates main sensor/model updates and the HUD;
+the HUD preference is retained and its view resumes after fullscreen focus ends.
+The main GPU surface may remain cached. Disabled HUDs retain the supported async
+readiness/cancellation/drop lifecycle. No forced working-set trimming is used.
+Compact remains 584x526; Expanded remains 800x600. A working-set target below
+100 MB is not a benchmark result. See the current report for measured scope.
+
+TOPOLOGY AND SENSORS
+Windows GetLogicalProcessorInformationEx(RelationAll) is the source of core,
+group, efficiency-class and L3 masks. Supported CPUID identity leaves supply
+vendor/model. A single CPUID 0x8000001E query cannot enumerate every Windows
+logical processor or prove CCD/CCX membership. No redundant raw-cpuid/gdt-cpus
+dependency is needed for the existing bounded Windows parser.
+
+Mode 0 is Standard; mode 1 is verified Intel hybrid; mode 2 is AMD shared-L3
+grouping. P/E counts are zero on nonhybrid CPUs. Inapplicable sections are removed
+from the layout and use no header/gap space. Physical-core and thread counts are
+measured separately: do not assume P*2 threads or one thread per E-core.
+AMD labels say CACHE GROUP, not physical CCD/CCX. One shared-L3 domain remains a
+valid one-group layout; a mapping's array length is not its distinct-domain count.
+Different L3 sizes establish cache asymmetry, not proof of 3D V-Cache marketing.
+Processors without supported Intel hybrid or AMD cache-group evidence retain a
+neutral standard view. Additional lower Intel efficiency classes remain grouped
+as E, without inferring LP-E identity. This x86_64 GNU-LLVM release is not an ARM64
+build and does not invent Prime or LP-E labels from an efficiency rank.
+
+PUBLIC BINDINGS AND ACTIONS
+AppWindow adds topology-mode (int: 0/1/2), cpu-warming (bool), handover-pending
+(bool) and configuration-pending (bool). Existing has-selection, bulk-error,
+bulk-valid, CPU identity/counts, is-hybrid, has-l3-groups, l3-groups and
+core-sections remain. l3-groups maps displayed logical rows to
+cache-domain IDs and is empty when the grouping capability is false; it is not
+a list of distinct cache groups. core-sections supplies actual visible groups.
+
+Existing action(string) handles profile-reset, handover/claim, bulk and save-game;
+existing pro-command(string) handles connect-sensors. No replacement callback
+names are required. The Overview sensor-guidance button opens modal 13; its
+Retry local sources action and the Settings sensor action use connect-sensors
+to request existing local sources. They do not install a provider or measure
+energy savings. profile-reset
+changes only the current affinity/priority draft until save-game is acknowledged.
+Command.request_id is additive protobuf tag 6; Snapshot.command_id and
+command_error are tags 27/28. Zero/absent receipt never implies success.
+
+Stable Slint models and changed-row comparisons are preserved. Any suppression
+must include freshness, availability and topology, not just load percentages:
+unchanged numeric load can still become stale/unavailable. Exact comparisons
+avoid hash-collision correctness assumptions and redundant full-model replacement.
+
+NVIDIA: pinned nvml-wrapper 0.13.0 and installed System32 driver library.
+AMD: supported ADL8 PMLog reader with owned start/stop lifecycle.
+Direct GPU cadence: nominally two seconds while visible/HUD-enabled.
+CPU/package/board fallback: existing LHM/OHM WMI provider, independent worker,
+ten-second cadence, thirty-second local expiry. No new provider or driver install.
+Missing values remain unavailable; measured zero is distinct. Sensor connection
+guidance explains that temperatures alone cannot establish energy savings.
+
+LAYOUT AND ACCESSIBILITY
+Dark tokens: canvas #0B0D12, surface #12151E, elevated #1A1F2C,
+active signal #00FF9D, cyan #00E5FF, warning #FFB800. Cyan indicates real data,
+not an AI feature. Existing light/system themes remain supported.
+Sensor warm-up receives a motion-aware progress treatment, not a fabricated ETA.
+Selected profiles use restrained ambient color instead of a dominant neon stroke.
+Remove requires a real selection. Bulk entry shows syntax guidance and validation.
+Power selectors have one caret; text filtering stays in the dedicated picker.
+Profile Reset restores inherited affinity/priority choices; it does not modify
+Windows until the user saves the profile through the engine transaction.
+
+Micro-footer geometry corrects a contradictory template: a 28px avatar plus
+4px padding cannot fit inside a 24px control. The avatar sits beside a compact
+24px pill in a 28px profile hit area, within the 32px padded footer row. The
+profile accent dot does not assert Discord presence.
+Copyright, About and v2.3.5 align on the metadata baseline. The profile modal keeps
+8px badge gaps, 4px/10px badge padding and the verified profile/link snapshot.
+Focus/keyboard behavior and reduced-motion/hidden-view gating remain applicable.
+Small text/color choices alone do not certify WCAG AAA. DPI and contrast checks
+must be reported by tested condition, not assumed from a screenshot or template.
+
+QA MATRIX / REQUIRED EVIDENCE
+TC-TP-01: AMD homogeneous and cache-domain fixtures; physical AMD testing only
+when available. A 7800X3D-like fixture is not a hardware certification.
+TC-TP-02: Intel hybrid fixture plus available local i9-14900K live observations.
+TC-FS-01: final EXE singleton harness, 30 concurrent launches, one owner.
+TC-AN-01: inspect compact/footer/profile and available display conditions;
+100/125/150% OS DPI and full AAA audit require separately recorded evidence.
+TC-AN-02: hidden/fullscreen application gating can be inspected; a GPU profiler
+must actually run before claiming zero render frames/utilization/allocation.
+TC-EC-01: use owned sleeper processes for forced-exit detection. Never taskkill
+the user's real game. Dry-run reports detect events but do not prove real writes.
+TC-EC-02: queue 50 engine toggle commands, check correlated final completion and
+listener readiness. This IPC stress test is not 50 captured GUI keypresses.
+Retain the prior 100 tests and rerun the complete suite; record the new count.
+Rerun nine singleton checks, seven integrity checks and all nine embedded icons.
+Never copy prior manual results into this release's verification report.
+
+PUBLICATION AND LICENSE
+GPL-3.0-or-later is retained (Slint combined distribution uses GPLv3).
+No DRM, HWID, anti-debug/VM behavior, injection or invented telemetry.
+The EXE is unsigned unless the publisher explicitly signs it. Checksums identify
+bytes; they do not authenticate an unsigned publisher or establish publication.
+
+PRIMARY REFERENCES
+https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-processor_relationship
+https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getlogicalprocessorinformationex
+https://learn.microsoft.com/en-us/previous-versions/windows/desktop/krnlprov/win32-processstarttrace
+https://learn.microsoft.com/en-us/windows/win32/api/evntrace/nf-evntrace-starttracea
+https://learn.microsoft.com/en-us/windows/win32/api/powersetting/nf-powersetting-powersetactivescheme
+https://docs.slint.dev/latest/docs/slint/guide/backends-and-renderers/backend_winit/
+The installed Slint 1.18.1 crate sources are the build's authoritative syntax/API.

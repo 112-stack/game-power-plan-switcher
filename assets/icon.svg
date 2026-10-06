@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <title>Game Power Plan Switcher — Kinetic Squircle</title>
+  <desc>A crisp emerald kinetic bolt on a softly illuminated obsidian squircle with a continuous-curvature silhouette, inner bevel and layered shadows.</desc>
+  <defs>
+    <!-- Original superellipse-inspired cubic silhouette; not an Apple template. -->
+    <path id="face" d="M128 16C179 16 206.18 17.82 222.18 33.82C238.18 49.82 240 77 240 128C240 179 238.18 206.18 222.18 222.18C206.18 238.18 179 240 128 240C77 240 49.82 238.18 33.82 222.18C17.82 206.18 16 179 16 128C16 77 17.82 49.82 33.82 33.82C49.82 17.82 77 16 128 16Z"/>
+    <path id="bolt" d="M154 52 87 143h35l-15 61 65-93h-35Z"/>
+    <linearGradient id="body" x1="128" y1="16" x2="128" y2="240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3F4958"/>
+      <stop offset="0.34" stop-color="#242D3B"/>
+      <stop offset="0.74" stop-color="#151C28"/>
+      <stop offset="1" stop-color="#0D131D"/>
+    </linearGradient>
+    <radialGradient id="ambient" cx="0" cy="0" r="1" gradientTransform="translate(112 19) rotate(90) scale(183 158)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D7E8F5" stop-opacity="0.16"/>
+      <stop offset="0.55" stop-color="#96BBC9" stop-opacity="0.035"/>
+      <stop offset="1" stop-color="#96BBC9" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="energy" cx="0" cy="0" r="1" gradientTransform="translate(128 124) rotate(90) scale(87)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#10A37F" stop-opacity="0.19"/>
+      <stop offset="1" stop-color="#10A37F" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="128" y1="16" x2="128" y2="240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D4E5F4" stop-opacity="0.62"/>
+      <stop offset="0.25" stop-color="#A8CED9" stop-opacity="0.17"/>
+      <stop offset="0.68" stop-color="#010609" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#05080D" stop-opacity="0.88"/>
+    </linearGradient>
+    <linearGradient id="bevel" x1="128" y1="20" x2="128" y2="236" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.2"/>
+      <stop offset="0.3" stop-color="#D0E4EB" stop-opacity="0.045"/>
+      <stop offset="0.65" stop-color="#00E5FF" stop-opacity="0.025"/>
+      <stop offset="1" stop-color="#B8DCD7" stop-opacity="0.12"/>
+    </linearGradient>
+    <linearGradient id="kinetic" x1="127" y1="52" x2="127" y2="204" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D4FFF0"/>
+      <stop offset="0.24" stop-color="#55F9BC"/>
+      <stop offset="0.58" stop-color="#00EAA0"/>
+      <stop offset="1" stop-color="#10A37F"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5" result="ambient-blur"/>
+      <feOffset in="ambient-blur" dy="5" result="ambient-shadow"/>
+      <feColorMatrix in="ambient-shadow" type="matrix" values="0 0 0 0 0.015 0 0 0 0 0.025 0 0 0 0 0.04 0 0 0 0.32 0" result="soft-shadow"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1.25" result="contact-blur"/>
+      <feOffset in="contact-blur" dy="1.5" result="contact-shadow"/>
+      <feColorMatrix in="contact-shadow" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.45 0" result="near-shadow"/>
+      <feMerge><feMergeNode in="soft-shadow"/><feMergeNode in="near-shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="bolt-glow" x="-30%" y="-20%" width="160%" height="140%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="3.5"/>
+    </filter>
+  </defs>
+
+  <!-- A 16px master-grid margin leaves space for the soft icon shadow. -->
+  <use xlink:href="#face" fill="url(#body)" filter="url(#shadow)"/>
+  <use xlink:href="#face" fill="url(#ambient)"/>
+  <use xlink:href="#face" fill="url(#energy)"/>
+  <use xlink:href="#face" stroke="url(#rim)" stroke-width="1.5"/>
+  <use xlink:href="#face" transform="translate(128 128) scale(0.965) translate(-128 -128)" stroke="url(#bevel)" stroke-width="1"/>
+
+  <!-- The single solid glyph, without tiny traces or text, survives 16px export. -->
+  <use xlink:href="#bolt" transform="translate(0 1)" fill="#000B09" opacity="0.42"/>
+  <use xlink:href="#bolt" fill="#00FF9D" opacity="0.15" filter="url(#bolt-glow)"/>
+  <use xlink:href="#bolt" fill="url(#kinetic)"/>
+  <path d="M154 52 87 143h35" stroke="#E2FFF4" stroke-opacity="0.38" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,73 @@
+Game Power Plan Switcher / Kinetic Squircle
+======================
+
+The current original mark combines a streamlined emerald kinetic bolt with a
+compact obsidian squircle. A top-down ambient gradient, restrained inner bevel,
+rim highlight and two-stage contact/ambient shadow give it a softly dimensional
+desktop appearance. The central silhouette stays solid and crisp at small sizes;
+there is no text, shield or tiny telemetry decoration. The transparent perimeter
+leaves room for the icon's soft shadow. The original SVG is licensed with this
+project's GPL-3.0-or-later source grant and has no font dependency. Previous
+MIT-licensed copies remain available under their original grant.
+
+The silhouette is an original continuous-curvature cubic approximation inspired
+by a superellipse, not an extracted Apple asset or an official Apple mask. Its
+face occupies 224 x 224 units in a 256-unit viewBox, leaving 16 units on each side
+for the ambient shadow. These are deliberate optical margins for this Windows
+icon, not claimed Apple-mandated proportions. Apple-like softness and light
+direction are aesthetic references; the app keeps its own identity. The original artwork is credited to NN6.
+Apple's app-icon guidance was consulted at:
+https://developer.apple.com/design/human-interface-guidelines/app-icons
+The page required JavaScript in this environment; no official exact contour was
+retrieved or reproduced. ICNS is provided only as an export format.
+
+Assets
+------
+assets/icon.svg       Editable, scalable master (256 x 256 viewBox).
+assets/icon.png       512 x 512 RGBA image for Slint's window icon.
+assets/icon-1024.png  1024 x 1024 RGBA export for larger previews.
+assets/NN6.ico        Windows icon: 16, 20, 24, 32, 40, 48, 64, 128 and 256 px.
+assets/NN6.icns       ICNS export: 16, 32, 64, 128, 256, 512 and 1024 px.
+
+The ICNS is an artwork export only. The application still targets Windows; this
+does not claim a tested macOS application package.
+
+Slint window integration
+------------------------
+Image paths in Slint are relative to the .slint source file. Because this project
+keeps app.slint under ui/ and the images under assets/, use:
+
+export component AppWindow inherits Window {
+    icon: @image-url("../assets/icon.png");
+    // Existing window content and controller bindings stay here.
+}
+
+If the assets directory lives beside the .slint file instead, the corresponding
+path is @image-url("assets/icon.png"). Slint embeds the referenced image during
+the build. No Rust runtime path lookup is required for this static icon.
+
+Windows Explorer / taskbar resources
+-----------------------------------
+native/app.rc already declares: 1 ICON "assets/NN6.ico"
+Rebuild the native executable after exporting the icon. build.rs tracks the
+PNG, SVG and ICO assets with cargo:rerun-if-changed, including the ICO resource,
+so a changed icon rebuilds even when native/app.rc itself has not changed.
+Windows may cache an icon for an existing executable path; a newly built EXE's
+resource can be verified independently of an old Explorer thumbnail.
+
+Re-export the SVG on another machine
+-----------------------------------
+Install Node.js and the sharp package in this source directory, then run:
+
+    npm install --no-save --package-lock=false sharp@0.35.4
+    node tools/export-icons.mjs
+
+The export script uses sharp 0.35.4 in the bundled build environment. It renders
+each ICO size directly from the SVG master. It also writes the complete ICNS
+container, so an Apple-specific icon utility is not required for asset export.
+
+On this project's original workstation, the existing bundled runtime is used by:
+
+    & work/Build-NativeBranding.ps1
+
+The SVG and its current exports in assets/ are the authoritative branding set.
