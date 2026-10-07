@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you choose to cite Game Power Plan Switcher, use this metadata. Citation is appreciated, not required by the software license."
 type: software
 title: "Game Power Plan Switcher"
-version: 2.3.6
-date-released: 2026-10-06
+version: 2.3.7
+date-released: 2026-10-07
 authors:
   - name: "NN6"
     website: "https://discord.com/users/176078095957098497"

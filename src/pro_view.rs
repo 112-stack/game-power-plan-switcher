@@ -2,6 +2,7 @@
 // Copyright (c) 2026 NN6. See LICENSE.txt and NOTICE.txt.
 //! Read-only projections for the Pro frontend. No power or scheduling writes.
 //! CPU charts contain measured observations; plan time is observed session time.
+use crate::localization::{format as trf, tr};
 use crate::model::{Config, Core, Game, Snapshot, Transition};
 use std::collections::{BTreeMap, VecDeque};
 
@@ -182,7 +183,7 @@ impl CpuTrend {
                     p.plan
                 )
             }
-            None => "No measured sample at this time".into(),
+            None => tr("No measured sample at this time").into(),
         }
     }
     pub fn available(&self, now: u64) -> bool {
@@ -193,11 +194,14 @@ impl CpuTrend {
     pub fn label(&self) -> String {
         if self.fresh {
             match self.points.back() {
-                Some(p) => format!("30 s measured CPU load · {:3.0}% latest", p.load),
-                None => "Waiting for a real CPU sample".into(),
+                Some(p) => trf(
+                    "30 s measured CPU load · {0}% latest",
+                    &[&format!("{:3.0}", p.load)],
+                ),
+                None => tr("Waiting for a real CPU sample").into(),
             }
         } else {
-            "30 s history · awaiting a fresh sample".into()
+            tr("30 s history · awaiting a fresh sample").into()
         }
     }
 }
@@ -371,9 +375,9 @@ impl SessionTimes {
         }
     }
     pub fn label(&self) -> String {
-        format!(
-            "This window · observed plan time · {} unknown excluded",
-            duration(self.unknown_ms)
+        trf(
+            "This window · observed plan time · {0} unknown excluded",
+            &[&duration(self.unknown_ms)],
         )
     }
 }
@@ -433,15 +437,15 @@ pub fn core_activity(load: f64) -> f32 {
 }
 pub fn detector_label(snapshot: &Snapshot) -> String {
     if !snapshot.monitoring {
-        return "Windows process detector · paused".into();
+        return tr("Windows process detector · paused").into();
     }
     if !snapshot.ready {
-        return "Connecting to Windows process detector".into();
+        return tr("Connecting to Windows process detector").into();
     }
     if snapshot.backend.contains("Compatibility") {
-        "WMI compatibility · 1 s start checks + process exit waits".into()
+        tr("WMI compatibility · 1 s start checks + process exit waits").into()
     } else if snapshot.backend.is_empty() {
-        "Windows process detector · backend not reported".into()
+        tr("Windows process detector · backend not reported").into()
     } else {
         snapshot.backend.clone()
     }
@@ -462,34 +466,39 @@ pub fn log_rows(history: &[Transition]) -> Vec<LogRow> {
             let overlay = event.cause == "Overlay API";
             LogRow {
                 label: if overlay {
-                    format!("{} · Overlay changed", local_clock(event.time_ms))
+                    trf("{0} · Overlay changed", &[&local_clock(event.time_ms)])
                 } else {
+                    let source = if !event.from_name.is_empty() {
+                        event.from_name.clone()
+                    } else if !event.from_guid.is_empty() {
+                        event.from_guid.clone()
+                    } else {
+                        tr("Source not captured")
+                    };
                     format!(
                         "{} · {} → {}",
                         local_clock(event.time_ms),
-                        if !event.from_name.is_empty() {
-                            &event.from_name
-                        } else if !event.from_guid.is_empty() {
-                            &event.from_guid
-                        } else {
-                            "Source not captured"
-                        },
+                        source,
                         event.name
                     )
                 },
                 detail: format!(
                     "{}{} · {:.2} ms{}",
-                    if overlay { &event.name } else { &event.cause },
+                    if overlay {
+                        event.name.clone()
+                    } else {
+                        tr(&event.cause)
+                    },
                     if event.process.is_empty() {
                         String::new()
                     } else {
-                        format!(" via {}", event.process)
+                        trf(" via {0}", &[&event.process])
                     },
                     event.duration_ms,
                     if overlay {
-                        " · overlay GUIDs not captured"
+                        tr(" · overlay GUIDs not captured")
                     } else {
-                        ""
+                        String::new()
                     }
                 ),
                 gaming: event.gaming,
@@ -531,7 +540,7 @@ pub fn local_clock(unix_ms: u64) -> String {
         .checked_mul(10_000)
         .and_then(|v| v.checked_add(116_444_736_000_000_000))
     else {
-        return "Time unavailable".into();
+        return tr("Time unavailable").into();
     };
     let file = FileTime {
         low: ticks as u32,
@@ -542,7 +551,7 @@ pub fn local_clock(unix_ms: u64) -> String {
     if unsafe { FileTimeToSystemTime(&file, &mut utc) } == 0
         || unsafe { SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local) } == 0
     {
-        return "Time unavailable".into();
+        return tr("Time unavailable").into();
     }
     format!("{:02}:{:02}:{:02}", local.hour, local.minute, local.second)
 }

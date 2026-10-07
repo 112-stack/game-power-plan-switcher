@@ -1,6 +1,6 @@
-Current release: Game Power Plan Switcher 2.3.6 (2026-10-06). This release renames NN6 Power Plan while preserving its monitoring behavior. Use the version-specific report attached to the 2.3.6 release for current verification. Older version-specific notes, hashes and benchmarks remain historical.
+Current release: Game Power Plan Switcher 2.3.7 (2026-10-07). This release adds automatic Windows language selection, eight bundled languages and release-verification tooling. Use its attached version-specific verification report. Older notes, hashes and benchmarks remain historical.
 
-GAME POWER PLAN SWITCHER 2.3.6
+GAME POWER PLAN SWITCHER 2.3.7
 Windows x64 | Rust 2024 + C++23 + Slint 1.18.1
 
 Current release overview: README.md. Release integrity, signing instructions and
@@ -30,7 +30,7 @@ dragging and the resize grip now use Slint's winit_030 window adapter to queue
 native move/resize and reconcile release; minimize/maximize retain the bridge.
 
 RUN
-1. Open the new release Game-Power-Plan-Switcher-2.3.6.exe. No PS2EXE or extra PowerShell modules are needed.
+1. Open the new release Game-Power-Plan-Switcher-2.3.7.exe. No PS2EXE or extra PowerShell modules are needed.
    The GUI/monitor are compiled native code; launcher discovery and legacy-task
    handover use the Windows PowerShell 5.1 executable included with Windows.
 2. Existing Siege aliases and saved WPF game names are migrated when compatible.
@@ -67,10 +67,17 @@ the notice being displayed.
 
 The shipped application requires Windows 10/11 x64 with a compatible OpenGL
 graphics driver for Slint's FemtoVG renderer, introduced in 2.3.2 and retained in
-2.3.6. Earlier RAM/CPU measurements apply to their recorded 2.3.2 binary, not this
+2.3.7. Earlier RAM/CPU measurements apply to their recorded 2.3.2 binary, not this
 revision. This is not a promise of a particular memory/performance gain.
 The tested development PC runs Windows 11. ARM64, other machines, mixed DPI and
 multiple monitors have not been certified. This build is not Authenticode signed.
+
+LANGUAGE
+System default follows Windows display-language settings automatically at startup
+and when Windows announces a language-setting change. The globe button or
+Settings > Window & keys > Language saves an explicit override. Eight languages
+are bundled offline; unsupported languages fall back to English. See
+docs/LOCALIZATION.md for language scope, script support and contribution guidance.
 
 POWER PLANS
 Gaming: LowLatency-Intel v2
@@ -181,7 +188,7 @@ No extra topology dependency is required: kernel32 and standard Rust CPUID
 intrinsics suffice. nvml-wrapper remains pinned to 0.13.0 for GPU sensors.
 To save a read-only topology report, from the EXE directory in PowerShell:
     $topologyReport = Join-Path $PWD 'Game-Power-Plan-Switcher-topology.json'
-    & .\Game-Power-Plan-Switcher-2.3.6.exe --topology-probe $topologyReport
+    & .\Game-Power-Plan-Switcher-2.3.7.exe --topology-probe $topologyReport
 The report path must be absolute. This command does not start a GUI/engine or
 modify power plans, affinity, startup, sensor providers or installed drivers.
 
@@ -238,10 +245,10 @@ app's Startup control explicitly when updating that installation.
 %LOCALAPPDATA%\NN6PowerPlan\NativeApp\            startup executable
 %LOCALAPPDATA%\GamePowerPlan\switch.log           timestamped plan switches
 
-The version-specific report attached to the 2.3.6 release records its checks and
+The version-specific report attached to the 2.3.7 release records its checks and
 limits; source changes alone are not verification evidence. Older reports apply
 only to the binaries they identify. The versioned release is
-Game-Power-Plan-Switcher-2.3.6.exe. Historical 2.0/2.1/2.2/2.3/2.3.1/2.3.2
+Game-Power-Plan-Switcher-2.3.7.exe. Historical 2.0/2.1/2.2/2.3/2.3.1/2.3.2
 reports and requirement audits remain in the original workspace; they are not
 included in the public ZIP or relabeled as current verification. See README.md,
 RELEASE-SECURITY.md and DEPENDENCY-SOURCES.json for public distribution details.
@@ -272,7 +279,7 @@ compatibility is not certified; the badge does not guarantee a ban outcome.
 SAFE PREVIEW
 From Windows PowerShell, in the executable's directory:
     $env:NN6_TEST_DATA_DIR=Join-Path $env:TEMP ('NN6-preview-'+[guid]::NewGuid())
-    Start-Process .\Game-Power-Plan-Switcher-2.3.6.exe -ArgumentList '--dry-run','--start-paused' -WindowStyle Hidden
+    Start-Process .\Game-Power-Plan-Switcher-2.3.7.exe -ArgumentList '--dry-run','--start-paused' -WindowStyle Hidden
     Remove-Item Env:\NN6_TEST_DATA_DIR
 
 Preview mode can detect games but cannot change plans, install startup or take
@@ -346,7 +353,7 @@ requires exclusive monitor ownership; use the supplied workspace wrapper only
 with real games closed. It restores the old task/plan/Run value in finally.
 The portable copy in this archive is Test-Live.ps1. Run it from an ordinary
 interactive Windows PowerShell session, with real games closed:
-    .\Test-Live.ps1 -Executable C:\Path\Game-Power-Plan-Switcher-2.3.6.exe
+    .\Test-Live.ps1 -Executable C:\Path\Game-Power-Plan-Switcher-2.3.7.exe
 This is an explicit live test: it temporarily stops the exact previous NN6 task,
 switches the actual plans, tests startup/overlay/scheduling, then restores state.
 Render instrumentation is activated only by NN6_FRAME_REPORT and writes local

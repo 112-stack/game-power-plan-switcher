@@ -25,6 +25,7 @@ static constexpr UINT TrayMessage = WM_APP + 61;
 static constexpr UINT TrayConfigure = WM_APP + 62;
 static constexpr UINT HotkeyConfigure = WM_APP + 63;
 static constexpr UINT TrayAlreadyRunning = WM_APP + 64;
+static constexpr UINT TrayLanguageConfigure = WM_APP + 65;
 static constexpr UINT MonitorHotkey = 0x4e61;
 static constexpr UINT OverlayHotkey = 0x4e62;
 static std::atomic<unsigned> last_external_foreground{0};
@@ -63,6 +64,19 @@ struct ProHotkeyRequest {
 struct ProTrayRequest {
   bool enabled, monitoring;
 };
+// Fixed storage avoids allocations/exceptions across the C ABI and window
+// procedure. Captions belong to the tray thread after synchronous delivery.
+static constexpr unsigned TrayLabelCount = 7, TrayLabelCapacity = 256;
+struct ProTrayLanguage {
+  wchar_t labels[TrayLabelCount][TrayLabelCapacity] = {
+      L"Overview",
+      L"Gaming plan",
+      L"Default plan",
+      L"Choose a power plan",
+      L"Pause monitoring",
+      L"Resume monitoring",
+      L"Exit && restore Default"};
+};
 struct ProContext {
   ProCallback callback = nullptr;
   void *user = nullptr;
@@ -85,6 +99,7 @@ struct ProContext {
   HICON icon = nullptr;
   HWINEVENTHOOK foreground_hook = nullptr;
   NOTIFYICONDATAW notification{sizeof(NOTIFYICONDATAW)};
+  ProTrayLanguage tray_language;
   void emit(unsigned event, unsigned value = 0) {
     if (callback)
       callback(user, event, value);
@@ -158,7 +173,8 @@ static void notify_already_running(ProContext *context) {
   note.uFlags = NIF_INFO | NIF_REALTIME;
   note.dwInfoFlags = NIIF_INFO | NIIF_NOSOUND | NIIF_RESPECT_QUIET_TIME;
   pro_text(L"Game Power Plan Switcher", note.szInfoTitle, 64);
-  pro_text(L"Game Power Plan Switcher is already running. Bringing existing window to front.",
+  pro_text(L"Game Power Plan Switcher is already running. Bringing existing "
+           L"window to front.",
            note.szInfo, 256);
   SetLastError(0);
   if (!Shell_NotifyIconW(NIM_MODIFY, &note))
@@ -170,7 +186,8 @@ static void tray_menu(ProContext *context, LPARAM position) {
     context->emit(8, last_error());
     return;
   }
-  AppendMenuW(menu, MF_STRING, 1, L"Show Game Power Plan Switcher");
+  const auto &labels = context->tray_language.labels;
+  AppendMenuW(menu, MF_STRING, 1, labels[0]);
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   HMENU profiles = CreatePopupMenu();
   if (!profiles) {
@@ -178,14 +195,12 @@ static void tray_menu(ProContext *context, LPARAM position) {
     context->emit(8, last_error());
     return;
   }
-  AppendMenuW(profiles, MF_STRING, 2, L"Gaming");
-  AppendMenuW(profiles, MF_STRING, 3, L"Default / Balanced");
-  AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(profiles),
-              L"Quick Switch Profile");
-  AppendMenuW(menu, MF_STRING, 4,
-              context->monitoring ? L"Pause monitoring" : L"Resume monitoring");
+  AppendMenuW(profiles, MF_STRING, 2, labels[1]);
+  AppendMenuW(profiles, MF_STRING, 3, labels[2]);
+  AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(profiles), labels[3]);
+  AppendMenuW(menu, MF_STRING, 4, context->monitoring ? labels[4] : labels[5]);
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, 5, L"Exit Game Power Plan Switcher");
+  AppendMenuW(menu, MF_STRING, 5, labels[6]);
   POINT point{static_cast<short>(LOWORD(position)),
               static_cast<short>(HIWORD(position))};
   if (point.x == -1 && point.y == -1)
@@ -265,6 +280,13 @@ static LRESULT CALLBACK pro_window_proc(HWND window, UINT message, WPARAM w,
     }
     return add_tray(context);
   }
+  case TrayLanguageConfigure: {
+    const auto *request = reinterpret_cast<const ProTrayLanguage *>(l);
+    if (!request)
+      return ERROR_INVALID_PARAMETER;
+    context->tray_language = *request;
+    return 0;
+  }
   case HotkeyConfigure: {
     auto *request = reinterpret_cast<ProHotkeyRequest *>(l);
     auto &result = *request->result;
@@ -291,6 +313,11 @@ static LRESULT CALLBACK pro_window_proc(HWND window, UINT message, WPARAM w,
       context->emit(6);
     return 0;
   case WM_SETTINGCHANGE:
+    context->emit(7, pro_dark_theme() ? 1 : 0);
+    // Re-check the Windows display-language API, not keyboard layout. Defer
+    // actual GUI work through the existing asynchronous Rust callback.
+    context->emit(10);
+    return 0;
   case WM_THEMECHANGED:
     context->emit(7, pro_dark_theme() ? 1 : 0);
     return 0;
@@ -347,8 +374,9 @@ extern "C" void *nn6_pro_start(ProCallback callback, void *user,
       // not receive them.
       if (!startup_error &&
           !CreateWindowExW(WS_EX_TOOLWINDOW, cls.lpszClassName,
-                           L"Game Power Plan Switcher background integration", WS_POPUP, 0, 0, 0, 0,
-                           nullptr, nullptr, instance, context))
+                           L"Game Power Plan Switcher background integration",
+                           WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance,
+                           context))
         startup_error = last_error();
       {
         std::lock_guard<std::mutex> lock(context->mutex);
@@ -402,6 +430,27 @@ extern "C" unsigned nn6_pro_tray(void *handle, bool enabled, bool monitoring) {
   return static_cast<unsigned>(SendMessageW(
       context->window, TrayConfigure, 0, reinterpret_cast<LPARAM>(&request)));
 }
+extern "C" unsigned nn6_pro_tray_language(void *handle, const wchar_t *labels,
+                                          unsigned count, unsigned capacity) {
+  auto *context = static_cast<ProContext *>(handle);
+  if (!context || !IsWindow(context->window))
+    return ERROR_INVALID_WINDOW_HANDLE;
+  if (!labels || count != TrayLabelCount || capacity != TrayLabelCapacity)
+    return ERROR_INVALID_PARAMETER;
+  ProTrayLanguage request;
+  for (unsigned row = 0; row < TrayLabelCount; ++row) {
+    const auto *start = labels + row * TrayLabelCapacity;
+    if (!start[0] || std::find(start, start + TrayLabelCapacity, L'\0') ==
+                         start + TrayLabelCapacity)
+      return ERROR_INVALID_PARAMETER;
+    std::copy(start, start + TrayLabelCapacity, request.labels[row]);
+  }
+  // SendMessageW completes the copy before this stack request is destroyed.
+  // Never convert this to PostMessageW with caller-owned storage.
+  return static_cast<unsigned>(
+      SendMessageW(context->window, TrayLanguageConfigure, 0,
+                   reinterpret_cast<LPARAM>(&request)));
+}
 extern "C" unsigned nn6_pro_notify_already_running(void *handle) {
   auto *context = static_cast<ProContext *>(handle);
   if (!context || !IsWindow(context->window))
@@ -410,7 +459,7 @@ extern "C" unsigned nn6_pro_notify_already_running(void *handle) {
   // shell. Subsequent shell failures use the existing tray-error callback.
   SetLastError(0);
   return PostMessageW(context->window, TrayAlreadyRunning, 0, 0) ? 0
-                                                               : last_error();
+                                                                 : last_error();
 }
 extern "C" unsigned nn6_pro_hotkeys(void *handle, unsigned monitor_modifiers,
                                     unsigned monitor_key,
@@ -926,7 +975,8 @@ extern "C" unsigned nn6_pro_file_dialog(void *owner, bool save, unsigned kind,
   dialog.lpstrFile = out;
   dialog.nMaxFile = cap;
   dialog.lpstrDefExt = extension;
-  dialog.lpstrTitle = save ? L"Export Game Power Plan Switcher data" : L"Open file";
+  dialog.lpstrTitle =
+      save ? L"Export Game Power Plan Switcher data" : L"Open file";
   dialog.Flags = OFN_EXPLORER | OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST |
                  (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
   BOOL accepted = save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog);

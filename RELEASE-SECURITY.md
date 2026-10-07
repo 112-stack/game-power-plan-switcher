@@ -1,6 +1,77 @@
-> Current product: Game Power Plan Switcher 2.3.6 (2026-10-06). See IMPLEMENTATION.txt for topology, pending command receipts, compact footer, settings and specification corrections. RELEASE-VERIFICATION.txt records the current evidence; older version-specific notes and benchmarks below remain historical.
+> Current product: Game Power Plan Switcher 2.3.7 (2026-10-07). Use the version-specific verification report attached to the 2.3.7 release for current evidence. IMPLEMENTATION.txt, RELEASE-VERIFICATION.txt and older benchmarks are retained historical records; they do not describe new checks on this binary.
 
-# NN6 2.3.3 release integrity and security
+# Release integrity and security
+
+## Code Signing and SmartScreen
+
+**The 2.3.7 executable is unsigned.** The new signing workflow is an explicit publisher step for a future release. No legitimate publisher certificate, private key or Sigstore signing identity is configured here, and no signature or Microsoft approval is implied. An unsigned local build remains supported.
+
+Authenticode signing requires a publicly trusted code-signing certificate issued for the real publisher. OV and EV certificates work through their provider's supported Windows certificate store/KSP/CSP, including hardware-backed tokens. Follow the certificate provider's identity and key-protection requirements; do not assume a new public certificate can be exported as a PFX. A self-signed test certificate is not public trust. Never commit keys, PFX files or passwords.
+
+A valid signature identifies the publisher; it does not guarantee a warning-free first download. SmartScreen considers file and publisher reputation, and a newly signed binary may be **unrecognized while showing a verified publisher**. This is different from **Unknown Publisher**. EV certificates no longer bypass reputation checks. Do not remove Windows protections, claim a guaranteed time-to-reputation, or describe antivirus submission as a consumer SmartScreen reputation whitelist. [Microsoft's current SmartScreen guidance](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
+
+### Build, sign, verify, then package
+
+1. Review the source and locked dependencies, run the affected checks, and record the actual toolchain. Install the Windows SDK signing tools from Microsoft. Keep the existing published release intact.
+2. Select the intended code-signing certificate in `Cert:\CurrentUser\My` (or `LocalMachine` with `-CertificateStore LocalMachine`). The thumbprint selects a certificate; it is not a SHA-1 file signature.
+3. Run the script below with the actual LLVM-MinGW installation and release tag. `OutputDirectory` must be new and its parent must exist. The script uses the pinned `Build.ps1` release/locked build, creates a separate copy to sign, verifies it, then writes the manifest/checksums from the **signed bytes**. Failed work stays in a clearly marked `.incomplete-*` directory; never publish that directory.
+
+```powershell
+Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert |
+  Select-Object Subject, Thumbprint, NotAfter, HasPrivateKey
+
+.\tools\Build-Signed-Release.ps1 `
+  -LlvmMingw C:\Toolchains\llvm-mingw `
+  -LlvmMingwRelease '20260922-ucrt' `
+  -OutputDirectory C:\Releases\gpps-next `
+  -Thumbprint 'REPLACE_WITH_REAL_CERTIFICATE_THUMBPRINT'
+```
+
+The release tag above is the project's pinned LLVM-MinGW UCRT release, not a guess about an arbitrary installation. Supply the tag of the exact toolchain you actually use. The output uses `Game-Power-Plan-Switcher-<CargoVersion>.exe`, `Game-Power-Plan-Switcher-release-manifest.json` and `Game-Power-Plan-Switcher-release-checksums.txt`. Choose and review the next application version before publication; these scripts neither bump versions nor upload or overwrite GitHub assets.
+
+To sign a reviewed prebuilt file instead:
+
+```powershell
+.\tools\Sign-Release.ps1 -ExePath C:\Builds\Game-Power-Plan-Switcher.exe `
+  -SignedExePath C:\Releases\Game-Power-Plan-Switcher.signed.exe `
+  -Thumbprint 'REPLACE_WITH_REAL_CERTIFICATE_THUMBPRINT' `
+  -TimestampUrl 'http://timestamp.digicert.com' `
+  -Description 'Game Power Plan Switcher' `
+  -DescriptionUrl 'https://github.com/112-stack/game-power-plan-switcher'
+```
+
+`Sign-Release.ps1` locates SignTool under `WindowsSdkDir`, then standard SDK paths, or accepts `-SignToolPath`. It signs a new copy, uses SHA-256 for the file and RFC 3161 timestamp digest, and treats SignTool warnings/nonzero exits as failure. It verifies every embedded signature with `verify /pa /all /v`, requires a timestamp, and reports the actual signer and certificate expiry. The original EXE remains unchanged. Use the timestamp endpoint allowed by your certificate provider. [SignTool reference](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool), [timestamping guidance](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures).
+
+For an eligible existing PFX, pass `-PfxPath` instead of `-Thumbprint`; supply `-PfxPassword (Read-Host -AsSecureString)` or the process environment variable `NN6_SIGN_PFX_PASSWORD` from a secret manager. Do not type passwords into shell history or source files. SignTool's PFX interface temporarily exposes `/p` to local process inspection even when the wrapper never logs it; prefer certificate-store/hardware signing. The scripts do not import certificates or install trust roots.
+
+### Optional detached Sigstore signing
+
+Add `-UseSigstore -ExpectedIdentity <exact-identity> -ExpectedIssuer <exact-issuer> -TrustedRootPath <trusted-root.json>` to the build script only when intentionally signing the manifest. Merely installing Cosign does not enable it. Keyless signing can use network/OIDC authentication and publish the certificate identity and artifact digest in a public transparency log; it is not an offline signing action. No project identity is invented or automatically approved. [Sigstore blob signing](https://docs.sigstore.dev/cosign/signing/signing_with_blobs/).
+
+After Authenticode, the script creates the manifest, adds the observed signer metadata, runs `--verify-release`, optionally signs and verifies the manifest bundle, and finally writes checksums. Both download verifiers use local bundles and explicitly supplied trusted roots for offline Sigstore verification; provision a verified Cosign 3+ and trusted-root JSON independently before disconnecting. Exact identity and issuer must come from an authenticated channel, never only from an untrusted bundle. Required signature checks may not be skipped because a tool or root is absent. [Cosign verification reference](https://github.com/sigstore/cosign/blob/main/doc/cosign_verify-blob.md), [trusted-root configuration](https://docs.sigstore.dev/cosign/system_config/custom_components/).
+
+### Provenance and reproducibility limits
+
+`cargo build` never signs or contacts signing services. It records `rustc -vV`, compiler commit, the supplied `NN6_LLVM_MINGW_VERSION`, and the SHA-256 of Cargo.lock. Missing local LLVM-MinGW identity is marked unknown rather than guessed; the signed-release script requires it explicitly. `NN6_SIGN_CERT_THUMBPRINT` only enables a release-build reminder to run the separate signing script.
+
+Schema 2 adds `toolchain`, `source_tree_sha256`, `source_tree_algorithm` and `signing`. The source-tree algorithm, `sha256-path-length-content-v1`, hashes the domain `GamePowerPlanSwitcher/source-tree/v1\0`, followed by all regular files under `src/`, `ui/`, `native/` and `assets/`, sorted by UTF-8 relative path bytes with `/` separators. Each record contains little-endian 64-bit path length, path bytes, little-endian 64-bit file length, and the raw 32-byte content SHA-256. Symlinks/reparse points are rejected. A separate build-input fingerprint also covers the build scripts and configuration; the exact algorithm is in `build_support.rs`.
+
+The binary initially emits `signing.signed=false` with null signer fields. Only the publisher script replaces those fields with observations after signing. The built-in verifier checks bytes and embedded provenance and accepts the legacy schema-1 format where appropriate; it does not authenticate the manifest's `signing` declaration. Independent Windows/Sigstore verification supplies that evidence. A schema-2 manifest cannot become legacy just by changing its schema number. An old schema-1-only executable cannot read a new schema-2 manifest.
+
+This is a repeatable workflow, not a claim that timestamped signatures are byte-for-byte deterministic. Reproducibility experiments must also control toolchains, paths, environment, build timestamps and optional UUIDs, then compare the unsigned build outputs. Signing and timestamps intentionally change bytes. Publish final hashes after signing; do not modify resources or metadata inside the signed EXE afterward.
+
+### Submit a suspected Microsoft false positive
+
+1. Record the exact released EXE's SHA-256, detection name, Windows/security-product versions and reproducible behavior. Investigate whether the report identifies a real problem first.
+2. Open [Microsoft Security Intelligence file submission](https://www.microsoft.com/en-us/wdsi/filesubmission), sign in, and select the **software developer** submission path for an incorrectly detected file.
+3. Upload the exact affected file, choose the affected Microsoft security product, and describe its legitimate behavior, detection, hash and project URL. Review the upload because it sends the binary to Microsoft.
+4. Keep the submission ID, follow the determination in submission history, and use the contact option in the final result if disputing it. No favorable result or permanent allowlisting is guaranteed. [Microsoft's submission procedure](https://learn.microsoft.com/en-us/defender-xdr/submission-guide).
+
+Keep security protections enabled. Submission, signing and publication are explicit publisher actions; the app does none of them at runtime. See [TRUST.md](TRUST.md) for user-facing verification and [SECURITY.md](SECURITY.md) for reporting issues.
+
+## Historical 2.3.3 engineering assessment
+
+The sections below preserve earlier implementation decisions. The current workflow above supersedes their illustrative signing commands and schema-1-only description; historical hashes and measurements are not new release claims.
 
 The final licensing decision is **GPL-3.0-or-later, freely runnable**. This release uses transparent source notices, build metadata and explicit offline artifact comparison. It does not add DRM or hide different behavior from debuggers, virtual machines or users. Documentation is not evidence that a certificate was purchased, a file signed, a public repository created or a sample submitted.
 
@@ -50,7 +121,7 @@ Authenticode is not a plain whole-file SHA-256: PE signing excludes specific che
 Run these in the directory containing a **trusted** build. This GUI-subsystem executable is launched with `Start-Process -Wait` so PowerShell can reliably inspect its exit code.
 
 ```powershell
-$releaseExe = (Resolve-Path -LiteralPath '.\Game-Power-Plan-Switcher-2.3.6.exe').Path
+$releaseExe = (Resolve-Path -LiteralPath '.\Game-Power-Plan-Switcher-2.3.7.exe').Path
 $releaseManifest = Join-Path (Split-Path $releaseExe) 'NN6-release-manifest.json'
 $job = Start-Process -FilePath $releaseExe -ArgumentList @(
     '--write-release-manifest', ('"' + $releaseManifest + '"')
@@ -84,9 +155,9 @@ Install Microsoft's Windows SDK signing tools from their official distribution. 
 Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert |
     Select-Object Subject, Thumbprint, NotAfter, HasPrivateKey
 $publisherThumbprint = 'REPLACE_WITH_REAL_CERTIFICATE_THUMBPRINT'
-signtool sign /sha1 $publisherThumbprint /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 .\Game-Power-Plan-Switcher-2.3.6.exe
+signtool sign /sha1 $publisherThumbprint /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 .\Game-Power-Plan-Switcher-2.3.7.exe
 if ($LASTEXITCODE -ne 0) { throw 'Signing failed.' }
-signtool verify /pa /all /v .\Game-Power-Plan-Switcher-2.3.6.exe
+signtool verify /pa /all /v .\Game-Power-Plan-Switcher-2.3.7.exe
 if ($LASTEXITCODE -ne 0) { throw 'Authenticode verification failed.' }
 ```
 
@@ -122,10 +193,10 @@ steps:
   - name: Attest final release artifact
     uses: actions/attest@v4
     with:
-      subject-path: 'dist/Game-Power-Plan-Switcher-2.3.6.exe'
+      subject-path: 'dist/Game-Power-Plan-Switcher-2.3.7.exe'
 ```
 
-This is a fragment, not an installed publishing workflow. Pin the action to a reviewed full commit SHA in production. Verify a published artifact with `gh attestation verify .\Game-Power-Plan-Switcher-2.3.6.exe -R OWNER/REPOSITORY`, substituting the independently trusted repository. Provenance identifies a build context; it does not audit the source or replace Authenticode. [GitHub artifact-attestation guidance](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
+This is a fragment, not an installed publishing workflow. Pin the action to a reviewed full commit SHA in production. Verify a published artifact with `gh attestation verify .\Game-Power-Plan-Switcher-2.3.7.exe -R OWNER/REPOSITORY`, substituting the independently trusted repository. Provenance identifies a build context; it does not audit the source or replace Authenticode. [GitHub artifact-attestation guidance](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
 ## False-positive review and external actions
 
@@ -162,7 +233,7 @@ Current-release digests belong in the final generated manifest/checksum report a
 
 ## Optional Windows icon refresh
 
-The new release is `Game-Power-Plan-Switcher-2.3.6.exe`. Older review artifacts may use `NN6-PowerPlan-Native.exe`; their presence does not establish which version is currently running. Check a shortcut's target and IconLocation before assuming a stale image belongs to the new file. To attempt a non-destructive shell icon refresh on Windows where the utility exists:
+The new release is `Game-Power-Plan-Switcher-2.3.7.exe`. Older review artifacts may use `NN6-PowerPlan-Native.exe`; their presence does not establish which version is currently running. Check a shortcut's target and IconLocation before assuming a stale image belongs to the new file. To attempt a non-destructive shell icon refresh on Windows where the utility exists:
 
 ```powershell
 & "$env:SystemRoot\System32\ie4uinit.exe" -show

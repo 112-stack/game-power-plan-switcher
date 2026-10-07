@@ -10,6 +10,7 @@ mod exercise;
 mod frame_probe;
 mod gui_instance;
 mod ipc;
+mod localization;
 mod model;
 mod power;
 mod power_tools;

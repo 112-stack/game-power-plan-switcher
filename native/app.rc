@@ -1,8 +1,8 @@
 1 ICON "assets/NN6.ico"
 1 24 "native/app.manifest"
 1 VERSIONINFO
-FILEVERSION 2,3,6,0
-PRODUCTVERSION 2,3,6,0
+FILEVERSION 2,3,7,0
+PRODUCTVERSION 2,3,7,0
 FILEOS 0x40004
 FILETYPE 0x1
 BEGIN
@@ -11,8 +11,8 @@ BEGIN
   BLOCK "040904B0"
   BEGIN
    VALUE "FileDescription", "Game Power Plan Switcher\0"
-   VALUE "FileVersion", "2.3.6.0\0"
-   VALUE "ProductVersion", "2.3.6.0\0"
+   VALUE "FileVersion", "2.3.7.0\0"
+   VALUE "ProductVersion", "2.3.7.0\0"
    VALUE "ProductName", "Game Power Plan Switcher\0"
    VALUE "CompanyName", "NN6\0"
    VALUE "InternalName", "Game-Power-Plan-Switcher\0"

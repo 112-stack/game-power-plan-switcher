@@ -84,6 +84,10 @@ pub mod build_info {
     include!(concat!(env!("OUT_DIR"), "/build_info.rs"));
 }
 
+#[cfg(test)]
+#[path = "../build_support.rs"]
+mod build_support;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SectionDigest {
@@ -114,6 +118,211 @@ pub struct ReleaseManifest {
     pub sections: Vec<SectionDigest>,
     pub flags: PeFlags,
     pub provenance: serde_json::Value,
+    // Optional only so the legacy schema1 can still be read. validate_schema()
+    // requires every field for schema2 and rejects them on schema1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toolchain: Option<ToolchainProvenance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_tree_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_tree_algorithm: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing: Option<SigningMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolchainProvenance {
+    /// Exact stdout from the compiler's rustc -vV, trimmed at the ends only.
+    pub rustc: String,
+    pub rustc_commit_hash: String,
+    /// Distribution tag explicitly supplied by the publisher, otherwise unknown.
+    pub llvm_mingw: String,
+    pub cargo_lock_sha256: String,
+    pub build_inputs_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SigningMetadata {
+    /// An external publisher assertion, never an Authenticode trust decision.
+    /// Sign-Release/Build-Signed-Release must independently verify the PE first.
+    pub signed: bool,
+    pub signer_subject: Option<String>,
+    pub signer_thumbprint: Option<String>,
+    pub not_after: Option<String>,
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
+/// Accept a real UTC RFC3339 calendar time (optionally fractional seconds).
+/// Certificate validity/trust is deliberately checked by Windows, not here.
+fn valid_utc_timestamp(value: &str) -> bool {
+    let Some(value) = value
+        .strip_suffix('Z')
+        .or_else(|| value.strip_suffix("+00:00"))
+    else {
+        return false;
+    };
+    let (time, fraction) = value
+        .split_once('.')
+        .map_or((value, None), |(a, b)| (a, Some(b)));
+    if fraction.is_some_and(|digits| {
+        digits.is_empty() || digits.len() > 9 || !digits.bytes().all(|b| b.is_ascii_digit())
+    }) {
+        return false;
+    }
+    if time.len() != 19
+        || time.as_bytes()[4] != b'-'
+        || time.as_bytes()[7] != b'-'
+        || time.as_bytes()[10] != b'T'
+        || time.as_bytes()[13] != b':'
+        || time.as_bytes()[16] != b':'
+    {
+        return false;
+    }
+    let bytes = time.as_bytes();
+    if bytes
+        .iter()
+        .enumerate()
+        .any(|(index, byte)| ![4, 7, 10, 13, 16].contains(&index) && !byte.is_ascii_digit())
+    {
+        return false;
+    }
+    let number = |range: std::ops::Range<usize>| {
+        bytes[range]
+            .iter()
+            .fold(0u32, |n, b| n * 10 + u32::from(b - b'0'))
+    };
+    let year = number(0..4);
+    let month = number(5..7);
+    let day = number(8..10);
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let max_day = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => return false,
+    };
+    year > 0
+        && day > 0
+        && day <= max_day
+        && number(11..13) < 24
+        && number(14..16) < 60
+        && number(17..19) < 60
+}
+
+fn validate_signing(signing: &SigningMetadata) -> Result<(), String> {
+    if !signing.signed {
+        if signing.signer_subject.is_some()
+            || signing.signer_thumbprint.is_some()
+            || signing.not_after.is_some()
+        {
+            return Err("Unsigned manifest must not claim a signer or certificate expiry".into());
+        }
+        return Ok(());
+    }
+    let subject = signing
+        .signer_subject
+        .as_deref()
+        .ok_or("Signed manifest lacks signer subject")?;
+    let thumbprint = signing
+        .signer_thumbprint
+        .as_deref()
+        .ok_or("Signed manifest lacks certificate thumbprint")?;
+    let expiry = signing
+        .not_after
+        .as_deref()
+        .ok_or("Signed manifest lacks certificate expiry")?;
+    if subject.trim().is_empty()
+        || subject.len() > 4096
+        || subject.chars().any(char::is_control)
+        || thumbprint.len() != 40
+        || !thumbprint.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || !valid_utc_timestamp(expiry)
+    {
+        return Err("Malformed external signing metadata".into());
+    }
+    Ok(())
+}
+
+fn validate_schema(manifest: &ReleaseManifest) -> Result<(), String> {
+    match manifest.schema {
+        1 => {
+            if manifest.toolchain.is_some()
+                || manifest.source_tree_sha256.is_some()
+                || manifest.source_tree_algorithm.is_some()
+                || manifest.signing.is_some()
+                || manifest.provenance.get("manifest_schema").is_some()
+            {
+                return Err("Legacy schema1 must not contain schema2 provenance or fields".into());
+            }
+        }
+        2 => {
+            if manifest
+                .provenance
+                .get("manifest_schema")
+                .and_then(serde_json::Value::as_u64)
+                != Some(2)
+            {
+                return Err("Schema2 requires the embedded manifest_schema marker".into());
+            }
+            let toolchain = manifest
+                .toolchain
+                .as_ref()
+                .ok_or("Schema2 lacks toolchain provenance")?;
+            let source_hash = manifest
+                .source_tree_sha256
+                .as_deref()
+                .ok_or("Schema2 lacks source tree digest")?;
+            if manifest.source_tree_algorithm.as_deref() != Some("sha256-path-length-content-v1")
+                || !valid_sha256(source_hash)
+                || !valid_sha256(&toolchain.cargo_lock_sha256)
+                || !valid_sha256(&toolchain.build_inputs_sha256)
+                || toolchain.rustc.trim().is_empty()
+                || toolchain.rustc.len() > 16384
+                || toolchain.llvm_mingw.is_empty()
+                || toolchain.llvm_mingw.len() > 128
+                || !toolchain
+                    .llvm_mingw
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b"._+-".contains(&c))
+                || !(toolchain.rustc_commit_hash == "unknown"
+                    || ([40, 64].contains(&toolchain.rustc_commit_hash.len())
+                        && toolchain
+                            .rustc_commit_hash
+                            .bytes()
+                            .all(|c| c.is_ascii_hexdigit())))
+                || !toolchain.rustc.lines().any(|line| {
+                    line.strip_prefix("commit-hash: ") == Some(toolchain.rustc_commit_hash.as_str())
+                })
+            {
+                return Err("Malformed schema2 toolchain or source provenance".into());
+            }
+            validate_signing(
+                manifest
+                    .signing
+                    .as_ref()
+                    .ok_or("Schema2 lacks signing metadata")?,
+            )?;
+        }
+        _ => return Err("Unsupported release manifest schema".into()),
+    }
+    if !valid_sha256(&manifest.sha256)
+        || manifest
+            .sections
+            .iter()
+            .any(|section| !valid_sha256(&section.sha256))
+    {
+        return Err("Malformed executable or section SHA-256".into());
+    }
+    Ok(())
 }
 
 fn range(data: &[u8], start: usize, len: usize) -> Result<&[u8], String> {
@@ -207,7 +416,7 @@ fn describe(data: &[u8]) -> Result<(Vec<SectionDigest>, PeFlags), String> {
 }
 
 pub fn provenance() -> serde_json::Value {
-    serde_json::json!({"version": build_info::VERSION, "authors": build_info::AUTHORS,
+    serde_json::json!({"manifest_schema": 2, "version": build_info::VERSION, "authors": build_info::AUTHORS,
         "git_commit": build_info::GIT_COMMIT, "git_dirty": build_info::GIT_DIRTY,
         "hardening": build_info::HARDENING, "build_time_unix": build_info::BUILD_TIME_UNIX,
         "build_time_source": build_info::BUILD_TIME_SOURCE, "build_uuid": build_info::BUILD_UUID,
@@ -219,7 +428,7 @@ pub fn inspect(exe: &Path) -> Result<ReleaseManifest, String> {
     let data = read_file_bounded(exe, 512 * 1024 * 1024)?;
     let (sections, flags) = describe(&data)?;
     Ok(ReleaseManifest {
-        schema: 1,
+        schema: 2,
         product: "Game Power Plan Switcher".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         bytes: data.len(),
@@ -227,6 +436,18 @@ pub fn inspect(exe: &Path) -> Result<ReleaseManifest, String> {
         sections,
         flags,
         provenance: provenance(),
+        toolchain: Some(ToolchainProvenance {
+            rustc: build_info::RUSTC_VERBOSE_VERSION.into(),
+            rustc_commit_hash: build_info::RUSTC_COMMIT_HASH.into(),
+            llvm_mingw: build_info::LLVM_MINGW_VERSION.into(),
+            cargo_lock_sha256: build_info::CARGO_LOCK_SHA256.into(),
+            build_inputs_sha256: build_info::BUILD_INPUTS_SHA256.into(),
+        }),
+        source_tree_sha256: Some(build_info::SOURCE_TREE_SHA256.into()),
+        source_tree_algorithm: Some(build_info::SOURCE_TREE_ALGORITHM.into()),
+        // This CLI performs no signature/trust-store/network operations. The
+        // explicit signing script replaces this default after verification.
+        signing: Some(SigningMetadata::default()),
     })
 }
 
@@ -245,13 +466,57 @@ pub fn write_manifest(output: &Path) -> Result<(), String> {
 }
 
 pub fn verify_manifest(path: &Path) -> Result<(), String> {
-    let expected: ReleaseManifest = serde_json::from_slice(&read_file_bounded(path, 1024 * 1024)?)
-        .map_err(|e| format!("Invalid release manifest: {e}"))?;
+    let expected = parse_manifest(&read_file_bounded(path, 1024 * 1024)?)?;
     let actual = inspect(&std::env::current_exe().map_err(|e| e.to_string())?)?;
     verify(&expected, &actual)
 }
+
+fn parse_manifest(bytes: &[u8]) -> Result<ReleaseManifest, String> {
+    // Option<T> intentionally accepts null for compatibility with legacy Rust
+    // types, so separately reject v2 keys in v1 even when their value is null.
+    let value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|e| format!("Invalid release manifest: {e}"))?;
+    let object = value
+        .as_object()
+        .ok_or("Release manifest must be an object")?;
+    let additions = [
+        "toolchain",
+        "source_tree_sha256",
+        "source_tree_algorithm",
+        "signing",
+    ];
+    match object.get("schema").and_then(serde_json::Value::as_u64) {
+        Some(1) if additions.iter().any(|name| object.contains_key(*name)) => {
+            return Err("Legacy schema1 must not contain schema2 keys, even null values".into());
+        }
+        Some(2) => {
+            if additions.iter().any(|name| !object.contains_key(*name)) {
+                return Err("Schema2 is missing mandatory provenance or signing fields".into());
+            }
+            let signing = object
+                .get("signing")
+                .and_then(serde_json::Value::as_object)
+                .ok_or("Schema2 signing must be an object")?;
+            if ["signed", "signer_subject", "signer_thumbprint", "not_after"]
+                .iter()
+                .any(|name| !signing.contains_key(*name))
+            {
+                return Err("Schema2 signing is missing mandatory fields".into());
+            }
+        }
+        _ => {}
+    }
+    // Deserialize original bytes, not Value: serde then still rejects duplicate
+    // struct fields and deny_unknown_fields prevents silently ignored metadata.
+    let manifest: ReleaseManifest =
+        serde_json::from_slice(bytes).map_err(|e| format!("Invalid release manifest: {e}"))?;
+    validate_schema(&manifest)?;
+    Ok(manifest)
+}
 fn verify(expected: &ReleaseManifest, actual: &ReleaseManifest) -> Result<(), String> {
-    if expected.schema != 1
+    validate_schema(expected)?;
+    validate_schema(actual)?;
+    if expected.schema != actual.schema
         || expected.product != actual.product
         || expected.version != actual.version
     {
@@ -270,6 +535,18 @@ fn verify(expected: &ReleaseManifest, actual: &ReleaseManifest) -> Result<(), St
     if expected.provenance != actual.provenance {
         return Err("Release provenance differs from the supplied manifest".into());
     }
+    if expected.toolchain != actual.toolchain
+        || expected.source_tree_sha256 != actual.source_tree_sha256
+        || expected.source_tree_algorithm != actual.source_tree_algorithm
+    {
+        return Err(
+            "Release toolchain or source fingerprint differs from embedded provenance".into(),
+        );
+    }
+    // Signing facts are external metadata. Shape was checked above, but equality
+    // with our unsigned default would reject legitimate post-build signing.
+    // The companion verifier checks the actual certificate independently before
+    // invoking this CLI. A matching manifest alone never authenticates a release.
     Ok(())
 }
 
@@ -440,6 +717,10 @@ mod tests {
             sections,
             flags,
             provenance: serde_json::json!({}),
+            toolchain: None,
+            source_tree_sha256: None,
+            source_tree_algorithm: None,
+            signing: None,
         };
         assert!(verify(&actual, &actual).is_ok());
         let mut bad = actual.clone();
@@ -454,5 +735,177 @@ mod tests {
         let mut bad = actual.clone();
         bad.provenance = serde_json::json!({"git_commit":"forged"});
         assert!(verify(&bad, &actual).is_err());
+    }
+
+    fn manifest_fixture(schema: u32) -> ReleaseManifest {
+        let data = fixture();
+        let (sections, flags) = describe(&data).unwrap();
+        let mut manifest = ReleaseManifest {
+            schema,
+            product: "Game Power Plan Switcher".into(),
+            version: "test".into(),
+            bytes: data.len(),
+            sha256: digest(&data),
+            sections,
+            flags,
+            provenance: serde_json::json!({"version":"test"}),
+            toolchain: None,
+            source_tree_sha256: None,
+            source_tree_algorithm: None,
+            signing: None,
+        };
+        if schema == 2 {
+            let commit = "a".repeat(40);
+            manifest.provenance["manifest_schema"] = serde_json::json!(2);
+            manifest.toolchain = Some(ToolchainProvenance {
+                rustc: format!("rustc test\ncommit-hash: {commit}\nLLVM version: test"),
+                rustc_commit_hash: commit,
+                llvm_mingw: "20260922".into(),
+                cargo_lock_sha256: digest(b"lock"),
+                build_inputs_sha256: digest(b"inputs"),
+            });
+            manifest.source_tree_sha256 = Some(digest(b"source tree"));
+            manifest.source_tree_algorithm = Some("sha256-path-length-content-v1".into());
+            manifest.signing = Some(SigningMetadata::default());
+        }
+        manifest
+    }
+
+    #[test]
+    fn schema1_legacy_and_schema2_manifests_roundtrip() {
+        for schema in [1, 2] {
+            let actual = manifest_fixture(schema);
+            let encoded = serde_json::to_vec(&actual).unwrap();
+            let decoded = parse_manifest(&encoded).unwrap();
+            assert!(verify(&decoded, &actual).is_ok());
+        }
+    }
+
+    #[test]
+    fn schema2_rejects_removed_fields_and_legacy_downgrade() {
+        let actual = manifest_fixture(2);
+        for key in [
+            "toolchain",
+            "source_tree_sha256",
+            "source_tree_algorithm",
+            "signing",
+        ] {
+            let mut value = serde_json::to_value(&actual).unwrap();
+            value.as_object_mut().unwrap().remove(key);
+            assert!(
+                parse_manifest(&serde_json::to_vec(&value).unwrap()).is_err(),
+                "{key}"
+            );
+        }
+        let mut downgraded = actual.clone();
+        downgraded.schema = 1;
+        assert!(verify(&downgraded, &actual).is_err());
+        downgraded.toolchain = None;
+        downgraded.source_tree_sha256 = None;
+        downgraded.source_tree_algorithm = None;
+        downgraded.signing = None;
+        assert!(verify(&downgraded, &actual).is_err());
+        downgraded
+            .provenance
+            .as_object_mut()
+            .unwrap()
+            .remove("manifest_schema");
+        assert!(verify(&downgraded, &actual).is_err());
+        let mut legacy = serde_json::to_value(manifest_fixture(1)).unwrap();
+        legacy["signing"] = serde_json::Value::Null;
+        assert!(parse_manifest(&serde_json::to_vec(&legacy).unwrap()).is_err());
+    }
+
+    #[test]
+    fn schema2_rejects_changed_toolchain_and_source_provenance() {
+        let actual = manifest_fixture(2);
+        for field in [
+            "rustc",
+            "rustc_commit_hash",
+            "llvm_mingw",
+            "cargo_lock_sha256",
+            "build_inputs_sha256",
+        ] {
+            let mut bad = serde_json::to_value(&actual).unwrap();
+            bad["toolchain"][field] = serde_json::json!("b".repeat(64));
+            let failed = parse_manifest(&serde_json::to_vec(&bad).unwrap())
+                .and_then(|expected| verify(&expected, &actual));
+            assert!(failed.is_err(), "{field}");
+        }
+        let mut bad = actual.clone();
+        bad.source_tree_sha256 = Some(digest(b"changed source"));
+        assert!(verify(&bad, &actual).is_err());
+        bad.source_tree_algorithm = Some("unframed".into());
+        assert!(verify(&bad, &actual).is_err());
+        bad.schema = 3;
+        assert!(verify(&bad, &actual).is_err());
+    }
+
+    #[test]
+    fn signing_metadata_is_explicit_external_data_not_a_trust_decision() {
+        let actual = manifest_fixture(2);
+        let mut signed = actual.clone();
+        signed.signing = Some(SigningMetadata {
+            signed: true,
+            signer_subject: Some("CN=Example Publisher".into()),
+            signer_thumbprint: Some("A".repeat(40)),
+            not_after: Some("2030-10-07T12:34:56.0000000Z".into()),
+        });
+        // Shape and exact executable are checked; the caller must still verify
+        // the real Authenticode chain. Never equate this success with trust.
+        assert!(verify(&signed, &actual).is_ok());
+        signed.signing.as_mut().unwrap().signed = false;
+        assert!(verify(&signed, &actual).is_err());
+        signed.signing.as_mut().unwrap().signed = true;
+        signed.signing.as_mut().unwrap().not_after = Some("2030-02-30T00:00:00Z".into());
+        assert!(verify(&signed, &actual).is_err());
+        signed.signing.as_mut().unwrap().not_after = Some("2030-10-07T12:34:56+00:00".into());
+        signed.signing.as_mut().unwrap().signer_thumbprint = Some("z".repeat(40));
+        assert!(verify(&signed, &actual).is_err());
+    }
+
+    #[test]
+    fn manifest_parser_rejects_unknown_duplicate_or_missing_signing_fields() {
+        let actual = manifest_fixture(2);
+        let mut value = serde_json::to_value(&actual).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(parse_manifest(&serde_json::to_vec(&value).unwrap()).is_err());
+        let mut value = serde_json::to_value(&actual).unwrap();
+        value["signing"]["trusted"] = serde_json::json!(true);
+        assert!(parse_manifest(&serde_json::to_vec(&value).unwrap()).is_err());
+        let mut value = serde_json::to_value(&actual).unwrap();
+        value["signing"]
+            .as_object_mut()
+            .unwrap()
+            .remove("not_after");
+        assert!(parse_manifest(&serde_json::to_vec(&value).unwrap()).is_err());
+        let encoded = serde_json::to_string(&actual).unwrap();
+        let duplicated = encoded.replacen("\"schema\":2", "\"schema\":2,\"schema\":2", 1);
+        assert!(parse_manifest(duplicated.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn certificate_dates_are_utc_calendar_times() {
+        for valid in [
+            "2028-02-29T23:59:59Z",
+            "2030-01-01T00:00:00.1+00:00",
+            "2030-01-01T00:00:00.0000000Z",
+        ] {
+            assert!(valid_utc_timestamp(valid), "{valid}");
+        }
+        for invalid in [
+            "",
+            "now",
+            "0000-01-01T00:00:00Z",
+            "2027-02-29T00:00:00Z",
+            "2028-13-01T00:00:00Z",
+            "2028-01-00T00:00:00Z",
+            "2028-01-01T24:00:00Z",
+            "2028-01-01T00:00:00+03:00",
+            "2028-01-01T00:00:00.Z",
+            "éééé-01-01T00:00:00Z",
+        ] {
+            assert!(!valid_utc_timestamp(invalid), "{invalid}");
+        }
     }
 }

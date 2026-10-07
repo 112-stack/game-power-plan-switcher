@@ -1,5 +1,5 @@
 Historical engineering notes for NN6 Power Plan 2.3.5 and earlier.
-Current product: Game Power Plan Switcher 2.3.6. Use README.md and RELEASE-VERIFICATION.txt for current commands and checks. Version-specific claims below remain historical.
+Current product: Game Power Plan Switcher 2.3.7. Use README.md and the verification report attached to the 2.3.7 release for current commands and checks. RELEASE-VERIFICATION.txt and the version-specific claims below remain historical.
 
 NN6 POWER PLAN NATIVE 2.3.5 — IMPLEMENTATION DECISIONS
 

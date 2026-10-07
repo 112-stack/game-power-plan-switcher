@@ -3,17 +3,122 @@
 // Included by ui.rs: operational controllers for the additive Pro bindings.
 // Native callbacks are always marshalled to Slint's event loop. File/plan and
 // sensor work runs in bounded background jobs; no hardware DLL is injected.
+
+/// Keep the native registration outcome separate from its translated caption.
+/// A language change redraws this observation; it never retries RegisterHotKey.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum HotkeyPresentation {
+    Registered {
+        monitor: Option<String>,
+        overlay: Option<String>,
+    },
+    Error(String),
+}
+impl HotkeyPresentation {
+    fn observed(
+        result: Result<crate::system_integration::HotkeyStatus, String>,
+        monitor: &str,
+        overlay: &str,
+    ) -> Self {
+        match result {
+            Ok(status) => {
+                let errors: Vec<_> = [status.monitor_error, status.overlay_error]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                if errors.is_empty() {
+                    Self::Registered {
+                        monitor: status.monitor_registered.then(|| monitor.to_owned()),
+                        overlay: status.overlay_registered.then(|| overlay.to_owned()),
+                    }
+                } else {
+                    Self::Error(errors.join(" · "))
+                }
+            }
+            Err(error) => Self::Error(error),
+        }
+    }
+    fn labels(&self, disabled: &str) -> Option<[String; 2]> {
+        match self {
+            Self::Registered { monitor, overlay } => Some([
+                monitor.clone().unwrap_or_else(|| disabled.into()),
+                overlay.clone().unwrap_or_else(|| disabled.into()),
+            ]),
+            Self::Error(_) => None,
+        }
+    }
+    fn message(&self) -> String {
+        match self {
+            Self::Registered { .. } => {
+                let labels = self.labels(&tr("disabled")).expect("Registered captions");
+                trf("Plan toggle: {0} · HUD: {1}", &[&labels[0], &labels[1]])
+            }
+            Self::Error(error) => error.clone(), // Preserve actual Windows diagnostics.
+        }
+    }
+}
+
+#[cfg(test)]
+mod hotkey_presentation_tests {
+    use super::*;
+
+    #[test]
+    fn locale_refresh_relabels_disabled_without_reconstructing_registration() {
+        let observation = HotkeyPresentation::observed(
+            Ok(crate::system_integration::HotkeyStatus {
+                monitor_registered: true,
+                overlay_registered: false,
+                ..Default::default()
+            }),
+            "Ctrl + Alt + P",
+            "",
+        );
+        let before = observation.clone();
+        assert_eq!(
+            observation.labels("معطّل"),
+            Some(["Ctrl + Alt + P".into(), "معطّل".into()])
+        );
+        assert_eq!(
+            observation.labels("deaktiviert"),
+            Some(["Ctrl + Alt + P".into(), "deaktiviert".into()])
+        );
+        assert_eq!(observation, before);
+    }
+
+    #[test]
+    fn registration_failure_survives_presentation_refresh_as_the_original_error() {
+        let observation = HotkeyPresentation::observed(
+            Ok(crate::system_integration::HotkeyStatus {
+                monitor_registered: true,
+                overlay_registered: false,
+                overlay_error: Some("Windows: hotkey already registered (0x581)".into()),
+                ..Default::default()
+            }),
+            "Ctrl + Alt + P",
+            "Ctrl + Alt + H",
+        );
+        assert_eq!(observation.labels("deaktiviert"), None);
+        assert_eq!(
+            observation.message(),
+            "Windows: hotkey already registered (0x581)"
+        );
+        assert_eq!(
+            HotkeyPresentation::observed(Err("Native unavailable".into()), "", "").message(),
+            "Native unavailable"
+        );
+    }
+}
 impl Controller {
     fn plan_name(&self, guid: &str) -> String {
         if guid.is_empty() {
-            "Use global Gaming plan".into()
+            tr("Use global Gaming plan").into()
         } else {
             self.state
                 .plans
                 .iter()
                 .find(|p| p.guid.eq_ignore_ascii_case(guid))
                 .map(|p| p.name.clone())
-                .unwrap_or_else(|| format!("Unavailable: {guid}"))
+                .unwrap_or_else(|| trf("Unavailable: {0}", &[guid]))
         }
     }
     fn apply_appearance(&self) {
@@ -36,7 +141,9 @@ impl Controller {
         ui.set_overlay_position(p.hud_position);
         ui.set_overlay_opacity(p.hud_opacity);
         ui.set_overlay_hotkey(p.hud_hotkey.clone().into());
-        ui.set_ui_font(crate::system_integration::preferred_font().into());
+        ui.set_ui_font(
+            localization::interface_font(&crate::system_integration::preferred_font()).into(),
+        );
         ui.set_mono_font("Consolas".into());
         ui.window()
             .with_winit_window(|w| w.set_decorations(p.native_frame));
@@ -47,7 +154,7 @@ impl Controller {
     }
     fn save_preferences(&self) {
         if let Err(e) = self.preferences.save() {
-            self.notice(&format!("Preferences: {e}"), true);
+            self.notice(&trf("Preferences: {0}", &[&e]), true);
         }
     }
     fn close_window(&self) {
@@ -65,6 +172,7 @@ impl Controller {
         // An explicit tray/singleton SHOW wins over the one deferred initial
         // start-minimized action, without changing the saved preference.
         self.show_requested.set(true);
+        schedule_system_language_refresh();
         if let Some(ui) = self.ui.upgrade() {
             let _ = ui.show();
             ui.window().with_winit_window(|w| {
@@ -121,6 +229,7 @@ impl Controller {
                     }
                 }
             }
+            SystemEvent::DisplayLanguageChanged => schedule_system_language_refresh(),
             SystemEvent::Error(e) => {
                 if let Some(ui) = self.ui.upgrade() {
                     ui.set_tray_available(false);
@@ -233,48 +342,27 @@ impl Controller {
     }
     fn register_hotkeys(&self) -> bool {
         if let Some(integration) = &self.integration {
-            match integration.set_hotkeys(&self.preferences.hotkey, &self.preferences.hud_hotkey) {
-                Ok(status) => {
-                    let errors: Vec<_> = [status.monitor_error, status.overlay_error]
-                        .into_iter()
-                        .flatten()
-                        .collect();
-                    if errors.is_empty() {
-                        let message = format!(
-                            "Plan toggle: {} · HUD: {}",
-                            if status.monitor_registered {
-                                self.preferences.hotkey.as_str()
-                            } else {
-                                "disabled"
-                            },
-                            if status.overlay_registered {
-                                self.preferences.hud_hotkey.as_str()
-                            } else {
-                                "disabled"
-                            }
-                        );
-                        if let Some(ui) = self.ui.upgrade() {
-                            ui.set_hotkey_status(message.clone().into());
-                        }
-                        self.notice(&message, false);
-                        return true;
-                    } else {
-                        let message = errors.join(" · ");
-                        if let Some(ui) = self.ui.upgrade() {
-                            ui.set_hotkey_status(message.clone().into());
-                        }
-                        self.notice(&message, true);
-                    }
-                }
-                Err(e) => {
-                    if let Some(ui) = self.ui.upgrade() {
-                        ui.set_hotkey_status(e.clone().into());
-                    }
-                    self.notice(&e, true);
-                }
-            }
+            let observation = HotkeyPresentation::observed(
+                integration.set_hotkeys(&self.preferences.hotkey, &self.preferences.hud_hotkey),
+                &self.preferences.hotkey,
+                &self.preferences.hud_hotkey,
+            );
+            let success = matches!(observation, HotkeyPresentation::Registered { .. });
+            let message = observation.message();
+            *self.hotkey_presentation.borrow_mut() = Some(observation);
+            self.render_hotkey_status();
+            self.notice(&message, !success);
+            return success;
         }
         false
+    }
+    fn render_hotkey_status(&self) {
+        if let (Some(ui), Some(observation)) = (
+            self.ui.upgrade(),
+            self.hotkey_presentation.borrow().as_ref(),
+        ) {
+            ui.set_hotkey_status(observation.message().into());
+        }
     }
     fn begin_job(&mut self, operation: impl FnOnce() -> Result<String, String> + Send + 'static) {
         if self.operation_busy {
@@ -357,8 +445,8 @@ impl Controller {
             }
             "connect-sensors" => {
                 match self.sensor_request.try_send(()) {
-                    Ok(()) => ui.set_provider_status("Checking installed GPU drivers and local LHM/OHM sensor providers. This does not install drivers or enable energy-savings estimates.".into()),
-                    Err(mpsc::TrySendError::Full(_)) => ui.set_provider_status("A sensor refresh is already queued. Missing readings stay unavailable.".into()),
+                    Ok(()) => ui.set_provider_status(tr("Checking installed GPU drivers and local LHM/OHM sensor providers. This does not install drivers or enable energy-savings estimates.").into()),
+                    Err(mpsc::TrySendError::Full(_)) => ui.set_provider_status(tr("A sensor refresh is already queued. Missing readings stay unavailable.").into()),
                     Err(mpsc::TrySendError::Disconnected(_)) => self.notice("The sensor worker is unavailable. Reopen the app to reconnect.", true),
                 }
             }
@@ -366,7 +454,7 @@ impl Controller {
                 self.candidate_query.clear();
                 self.candidate_page = 0;
                 self.running_candidates = Some(vec![]);
-                ui.set_candidate_source("Running processes · read-only Win32 snapshot".into());
+                ui.set_candidate_source(tr("Running processes · read-only Win32 snapshot").into());
                 ui.set_modal(2);
                 self.games();
                 let weak = self.ui.clone();
@@ -518,7 +606,7 @@ impl Controller {
                 _ => export.diagnostic_json(&directory, &details)?,
             };
             std::fs::write(&path, data).map_err(|e| e.to_string())?;
-            Ok(format!("Saved {}", path.display()))
+            Ok(trf("Saved {0}", &[&path.display().to_string()]))
         });
     }
     fn begin_plan_job(&mut self, operation: crate::power_tools::Operation, elevated: bool) {
@@ -608,9 +696,9 @@ impl Controller {
         if let Some(s) = sample {
             ui.set_cpu_sensor_provider(format!("{} · {}", s.cpu_provider, s.cpu_label).into());
             ui.set_gpu_sensor_provider(
-                format!(
-                    "{} · {} · utilization: {}",
-                    s.gpu_provider, s.gpu_label, s.gpu_utilization_provider
+                trf(
+                    "{0} · {1} · utilization: {2}",
+                    &[&s.gpu_provider, &s.gpu_label, &s.gpu_utilization_provider],
                 )
                 .into(),
             );
@@ -619,9 +707,9 @@ impl Controller {
             );
             ui.set_fan_sensor_provider(
                 if s.gpu_fan_rpm.is_some() || s.gpu_fan_percent.is_some() {
-                    format!(
-                        "{} · {} · reported fan speed",
-                        s.gpu_fan_provider, s.gpu_label
+                    trf(
+                        "{0} · {1} · reported fan speed",
+                        &[&s.gpu_fan_provider, &s.gpu_label],
                     )
                 } else {
                     format!("{} · {}", s.fan_provider, s.fan_label)
@@ -630,15 +718,15 @@ impl Controller {
             );
             ui.set_provider_status(sensor_status(s).into());
         } else {
-            ui.set_cpu_sensor_provider("Unavailable · awaiting fresh sample".into());
-            ui.set_gpu_sensor_provider("Unavailable · awaiting fresh sample".into());
-            ui.set_power_sensor_provider("Unavailable · awaiting fresh sample".into());
-            ui.set_fan_sensor_provider("Unavailable · awaiting fresh sample".into());
-            ui.set_provider_status("Waiting for a fresh hardware sensor sample…".into());
+            ui.set_cpu_sensor_provider(tr("Unavailable · awaiting fresh sample").into());
+            ui.set_gpu_sensor_provider(tr("Unavailable · awaiting fresh sample").into());
+            ui.set_power_sensor_provider(tr("Unavailable · awaiting fresh sample").into());
+            ui.set_fan_sensor_provider(tr("Unavailable · awaiting fresh sample").into());
+            ui.set_provider_status(tr("Waiting for a fresh hardware sensor sample…").into());
         }
     }
     fn update_hud(&mut self) {
-        let Some(_ui) = self.ui.upgrade() else { return };
+        let Some(ui) = self.ui.upgrade() else { return };
         let enabled = self.preferences.hud_enabled;
         if !enabled || self.state.suspended {
             self.hud_generation = self.hud_generation.wrapping_add(1);
@@ -669,6 +757,10 @@ impl Controller {
             self.view.publish();
             return;
         };
+        // Exported Slint globals belong to each component instance; the HUD
+        // must receive the main window's script-appropriate font explicitly.
+        hud.global::<crate::Theme>().set_ui_font(ui.get_ui_font());
+        hud.global::<crate::Theme>().set_rtl(ui.get_rtl());
         hud.set_plan_name(self.state.active_name.clone().into());
         let values: Vec<_> = self
             .state
@@ -682,13 +774,15 @@ impl Controller {
             && !self.state.suspended;
         hud.set_cpu_text(
             if recent && !values.is_empty() {
-                format!(
-                    "CPU {:5.1}% · {} threads",
-                    values.iter().sum::<f64>() / values.len() as f64,
-                    values.len()
+                trf(
+                    "CPU {0}% · {1} threads",
+                    &[
+                        &format!("{:5.1}", values.iter().sum::<f64>() / values.len() as f64),
+                        &values.len().to_string(),
+                    ],
                 )
             } else {
-                "CPU — · awaiting sample".into()
+                tr("CPU — · awaiting sample").into()
             }
             .into(),
         );
@@ -777,7 +871,7 @@ impl Controller {
                     .map_err(|e| e.to_string())?;
                 match window.window_handle().map_err(|e| e.to_string())?.as_raw() {
                     RawWindowHandle::Win32(handle) => Ok(handle.hwnd.get() as usize),
-                    _ => Err("HUD has no Windows native handle".into()),
+                    _ => Err(tr("HUD has no Windows native handle").into()),
                 }
             });
         let handle = match handle {
@@ -816,7 +910,7 @@ fn install_pro(
     // The provider is compiled in; construction is deferred until enabled.
     ui.set_visual_overlay_available(true);
     ui.set_sensors_available(false);
-    ui.set_provider_status("Checking local hardware sensor provider…".into());
+    ui.set_provider_status(tr("Checking local hardware sensor provider…").into());
     let c = control.clone();
     ui.on_pro_setting(move |key| c.borrow_mut().pro_setting(&key));
     let c = control.clone();
@@ -843,10 +937,22 @@ fn install_pro(
         }
     });
     let c = control.clone();
-    ui.on_event_selected(move|index|{
-        let c=c.borrow();if let Some(event)=usize::try_from(index).ok().and_then(|i|c.state.history.iter().rev().nth(i)){if let Some(ui)=c.ui.upgrade(){
-            ui.set_event_detail(format!("{} · {} → {}\nCause: {}\nProcess: {}\nPID: {}\nEngine Windows user: {}\nPower API duration: {:.3} ms\nFrom GUID: {}\nTo GUID: {}",pro_view::local_clock(event.time_ms),if event.from_name.is_empty(){"Not captured"}else{&event.from_name},event.name,event.cause,if event.process.is_empty(){"Not captured"}else{&event.process},if event.pid==0{"Not captured".into()}else{event.pid.to_string()},if event.account.is_empty(){"Not captured"}else{&event.account},event.duration_ms,event.from_guid,event.to_guid).into());
-        }}
+    ui.on_event_selected(move |index| {
+        let c = c.borrow();
+        if let Some(event) = usize::try_from(index).ok().and_then(|i| c.state.history.iter().rev().nth(i)) {
+            if let Some(ui) = c.ui.upgrade() {
+                let missing = tr("Not captured");
+                ui.set_event_detail(trf("{0} · {1} → {2}\nCause: {3}\nProcess: {4}\nPID: {5}\nEngine Windows user: {6}\nPower API duration: {7} ms\nFrom GUID: {8}\nTo GUID: {9}", &[
+                    &pro_view::local_clock(event.time_ms),
+                    if event.from_name.is_empty() { &missing } else { &event.from_name },
+                    &event.name, &tr(&event.cause),
+                    if event.process.is_empty() { &missing } else { &event.process },
+                    &if event.pid == 0 { missing.clone() } else { event.pid.to_string() },
+                    if event.account.is_empty() { &missing } else { &event.account },
+                    &format!("{:.3}", event.duration_ms), &event.from_guid, &event.to_guid,
+                ]).into());
+            }
+        }
     });
     let weak = ui.as_weak();
     match crate::system_integration::SystemIntegration::start(move |event| {
@@ -859,6 +965,9 @@ fn install_pro(
         });
     }) {
         Ok(integration) => {
+            if let Err(error) = integration.set_tray_language() {
+                control.borrow().notice(&error, true);
+            }
             let result = integration.set_tray(true, false);
             ui.set_tray_available(result.is_ok());
             ui.set_hotkeys_available(true);

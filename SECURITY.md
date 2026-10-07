@@ -16,7 +16,17 @@ Close normally or use Exit to restore state. The guardian attempts recovery afte
 
 ## Release handling
 
-Treat hashes, signatures and build provenance as separate evidence. A matching checksum alone establishes byte equality with its reference, not publisher identity or absence of bugs. A signature is not an antivirus approval. The release is published from 112-stack/game-power-plan-switcher without an Authenticode certificate or signing attestation; see the exact release verification report for observed signing status.
+Treat hashes, signatures and build provenance as separate evidence. A matching checksum alone establishes byte equality with its reference, not publisher identity or absence of bugs. A signature is not an antivirus approval. The 2.3.7 release remains unsigned; adding signing scripts does not retroactively sign it. Use the exact release verification report and independently inspect the downloaded file.
+
+## Why the binary is signed — publisher workflow
+
+Future signed releases use Authenticode to bind the signed executable content to a certificate-backed publisher identity. The signing pipeline requires a real code-signing certificate and verifies the result before producing release metadata. No such certificate has been configured for this project yet. A self-signed test certificate is not public trust.
+
+Authenticode does not guarantee the absence of bugs or malware, prove that a binary matches public source, or guarantee favorable antivirus/SmartScreen decisions. The manifest's `signing` fields are audit data written after signing, not evidence of a valid signature by themselves. Check the actual EXE and obtain the expected publisher identity through an independent trusted channel.
+
+Use [tools/Verify-Download.ps1](tools/Verify-Download.ps1) for independent file inspection. It checks EXE and manifest hashes first and uses cache-only Windows trust verification by default; missing or stale revocation/chain evidence can prevent offline validation. It does not fetch current revocation state. An optional `-ExpectedSignerThumbprint` pins a separately trusted certificate. The verifier never executes the downloaded app by default. `-AllowUnsigned` reports integrity only unless a separately verified Sigstore bundle authenticates the manifest's expected signer; that does not make the EXE Authenticode-signed. `-RunManifestCheck` requires both a valid Authenticode signature and either a separately obtained matching `-ExpectedSignerThumbprint` or a verified Sigstore identity, plus that explicit request to execute the file. A file signed by an unrelated trusted publisher does not meet this execution gate.
+
+Optional Sigstore verification requires the signed bundle, exact expected identity and issuer, and pre-provisioned trusted roots. The app itself makes no network calls for signing, identity validation or release verification. See [TRUST.md](TRUST.md) for scope and [RELEASE-SECURITY.md](RELEASE-SECURITY.md) for publisher commands.
 
 Keep Windows Defender enabled. Do not add exclusions, disable scanning, disguise the executable or pack it to suppress a detection. The owner can submit a suspected false positive using Microsoft's software-developer submission path, with the precise binary and explanation. Review uploads before sending; no sample has been submitted automatically. [Microsoft submission guidance](https://learn.microsoft.com/en-us/defender-xdr/submission-guide).
 

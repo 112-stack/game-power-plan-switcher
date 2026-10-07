@@ -1,4 +1,4 @@
-Game Power Plan Switcher 2.3.6
+Game Power Plan Switcher 2.3.7
 Previously released as NN6 Power Plan Native
 Copyright (C) 2026 NN6
 SPDX-License-Identifier: GPL-3.0-or-later

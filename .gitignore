@@ -1,6 +1,10 @@
 /target/
 *.pfx
 *.p12
+*.snk
+*signing*secret*
+/.signed-release*/
+/.release*.incomplete-*/
 *.key
 *.pem
 native-settings.json

@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.3.7 — 2026-10-07
+
+### Automatic language support
+
+- Follow the Windows display language automatically at startup and on language-setting change notifications. Preserve an explicitly selected language.
+- Add eight bundled interface and tray languages: English, Arabic, Spanish, Brazilian Portuguese, French, German, Russian and Simplified Chinese. English remains the fallback; no runtime downloads are needed.
+- Add a searchable language picker in the header and Settings, immediate switching, keyboard navigation and a saved preference. Parse Rust catalogs lazily by selected language.
+- Improve Arabic label alignment, mixed-direction text and script-aware font selection while preserving the compact layout. Keep process names, installed plan names, identifiers and structured records unchanged; some technical diagnostics and third-party text retain their original language.
+- Validate complete catalog key sets and format placeholders, share catalogs between Rust and Slint, and explicitly disable Slint's component-name translation context to prevent silent English fallback. Starter translations welcome native-speaker review.
+
+### Code signing and release trust
+
+- Add explicit post-build SignTool scripts for certificate-store OV/EV signing, SHA-256 digests, RFC 3161 timestamps and immediate signature checks. Local builds still need no certificate.
+- Add build/sign/manifest/checksum preparation and opt-in detached Sigstore signing. Signing credentials stay outside source control; keyless identity and transparency publication require a deliberate publisher action.
+- Add Windows and Bash download verifiers. Windows uses cached trust evidence by default; neither verifier runs the downloaded EXE by default. Unsigned inspection without separately authenticated Sigstore identity reports **INTEGRITY-ONLY**.
+- Extend release manifests to schema 2 with toolchain identifiers, Cargo.lock and source fingerprints, and external signing metadata. Retain legacy schema-1 verification and the existing integrity CLI commands.
+- Add trust-chain documentation and accurate SmartScreen guidance. **The 2.3.7 executable is unsigned:** no publisher certificate has been configured, and a signing pipeline does not create a trusted signature.
+
+### Compatibility and verification scope
+
+- Preserve GPL-3.0-or-later, separate GUI/engine/guardian processes, singleton ownership, OpenGL rendering, sensor channels, monitoring policy and dry-run isolation.
+- No activation, DRM, anti-analysis behavior, telemetry upload, language polling loop or automatic updater is introduced.
+- Use the version-specific 2.3.7 verification report and checksums attached to the release. Older screenshots, PDF guides and signing-development reports retain their original scope; they are not new performance or hardware measurements.
+
 ## 2.3.6 — 2026-10-06
 
 ### Product identity

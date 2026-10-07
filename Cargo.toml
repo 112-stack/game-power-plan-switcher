@@ -1,6 +1,6 @@
 [package]
 name = "game-power-plan-switcher"
-version = "2.3.6"
+version = "2.3.7"
 authors = ["NN6"]
 edition = "2024"
 rust-version = "1.99"
@@ -24,6 +24,8 @@ nvml-wrapper = "=0.13.0"
 [build-dependencies]
 slint-build = "=1.18.1"
 cc = "1"
+sha2 = "0.10"
+serde_json = "1"
 
 [profile.release]
 # LTO/panic/incremental belong on the root profile, not package overrides.

@@ -3,6 +3,7 @@
 //! GUI controller: immutable snapshots in, typed commands out. No power API waits.
 use crate::{
     AppWindow, CoreRow, CoreSection, GameRow, HistoryRow, ipc,
+    localization::{self, format as trf, tr},
     model::*,
     pro_view::{self, ProView},
     win,
@@ -20,6 +21,24 @@ use std::{
     time::{Duration, Instant},
 };
 thread_local! {static CONTROL:RefCell<Option<Rc<RefCell<Controller>>>>=const{RefCell::new(None)};}
+thread_local! {static LANGUAGE_REFRESH_QUEUED:Cell<bool>=const{Cell::new(false)};}
+
+fn schedule_system_language_refresh() {
+    if LANGUAGE_REFRESH_QUEUED.with(|queued| queued.replace(true)) {
+        return;
+    }
+    // Deferred, coalesced event work avoids a Controller borrow inside native
+    // focus callbacks (which may arrive while a modal/file dialog is active).
+    // This is not a periodic timer or a keyboard-layout observer.
+    slint::Timer::single_shot(Duration::ZERO, || {
+        LANGUAGE_REFRESH_QUEUED.with(|queued| queued.set(false));
+        CONTROL.with(|cell| {
+            if let Some(control) = cell.borrow().as_ref() {
+                control.borrow_mut().refresh_system_language();
+            }
+        });
+    });
+}
 // Slint's attributes hook runs when its WindowAdapter is created, before the
 // native HWND exists. A construction guard identifies only our telemetry HUD;
 // all main windows, dialogs and unrelated probe processes retain their defaults.
@@ -87,9 +106,13 @@ fn sensor_result_current(
         && now.saturating_duration_since(completed) < Duration::from_secs(3)
 }
 fn sensor_status(sample: &crate::system_integration::SensorSnapshot) -> String {
-    let mut parts = vec![format!(
-        "{} · {} readings · {}",
-        sample.provider, sample.readings, sample.gpu_label
+    let mut parts = vec![trf(
+        "{0} · {1} readings · {2}",
+        &[
+            &sample.provider,
+            &sample.readings.to_string(),
+            &sample.gpu_label,
+        ],
     )];
     if let Some(error) = sample.error.as_ref().filter(|s| !s.is_empty()) {
         parts.push(error.clone());
@@ -187,7 +210,7 @@ impl TelemetryView {
             }) {
                 Ok(()) => self.last.set(Some(visible)),
                 Err(e) => {
-                    ui.set_status(format!("CPU view notification: {e}").into());
+                    ui.set_status(trf("CPU view notification: {0}", &[&e.to_string()]).into());
                     ui.set_error(true);
                 }
             }
@@ -212,6 +235,7 @@ struct Controller {
     session_started: Instant,
     preferences: crate::preferences::Preferences,
     integration: Option<crate::system_integration::SystemIntegration>,
+    hotkey_presentation: RefCell<Option<HotkeyPresentation>>,
     sensor_request: mpsc::SyncSender<()>,
     sensor_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     running_candidates: Option<Vec<Game>>,
@@ -311,13 +335,13 @@ fn invalidate_cpu_display(ui: &AppWindow, rows: &VecModel<CoreRow>, reason: &str
             let identity = row.label.split_whitespace().next().unwrap_or("CPU");
             row.label = format!("{identity} —").into();
             row.activity = -1.;
-            row.detail = format!("Windows CPU activity unavailable · {reason}").into();
+            row.detail = trf("Windows CPU activity unavailable · {0}", &[&tr(reason)]).into();
             row
         })
         .collect();
     sync_rows(rows, invalid);
     ui.set_core_info("".into());
-    ui.set_telemetry(format!("CPU telemetry unavailable · {reason}").into());
+    ui.set_telemetry(trf("CPU telemetry unavailable · {0}", &[&tr(reason)]).into());
 }
 fn hwnd(ui: &AppWindow) -> usize {
     match ui
@@ -368,6 +392,70 @@ fn image(bytes: &[u8]) -> Image {
     )
 }
 impl Controller {
+    fn language_changed(&mut self, index: i32) {
+        let Some(requested) = localization::code(index) else {
+            return;
+        };
+        self.apply_language(requested, index, true);
+    }
+    fn refresh_system_language(&mut self) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        let Some(requested) = localization::code(ui.get_language_index()) else {
+            return;
+        };
+        if let Some(locale) = localization::system_refresh_target(requested) {
+            // A Windows change updates only the effective display locale. Keep
+            // the System default preference and do not rewrite appearance.json.
+            self.apply_language(locale, 0, false);
+        }
+    }
+    fn apply_language(&mut self, requested: &str, index: i32, persist: bool) {
+        let Some(ui) = self.ui.upgrade() else { return };
+        if let Err(error) = localization::select(requested) {
+            ui.set_language_index(1);
+            ui.set_rtl(false);
+            self.notice(&trf("Language selection failed: {0}", &[&error]), true);
+            return;
+        }
+        if persist {
+            self.preferences.language = requested.into();
+        }
+        ui.set_language_index(index);
+        ui.set_language_names(slint::ModelRc::new(VecModel::from(localization::names())));
+        ui.set_rtl(localization::is_rtl());
+        ui.set_ui_font(
+            localization::interface_font(&crate::system_integration::preferred_font()).into(),
+        );
+        let save_error = if persist {
+            self.preferences
+                .save()
+                .err()
+                .map(|error| trf("Preferences: {0}", &[&error]))
+        } else {
+            None
+        };
+        let tray_error = self
+            .integration
+            .as_ref()
+            .and_then(|integration| integration.set_tray_language().err());
+        // Reuse the existing models; only their translated presentation rows
+        // change. No engine command, process identity or plan name is rewritten.
+        self.core_keys.clear();
+        self.cores_dirty = true;
+        self.history_dirty = true;
+        self.games_dirty = true;
+        self.plans_dirty = true;
+        self.ui_dirty = true;
+        self.bind_cpu_topology(&ui);
+        self.render_snapshot(now_ms());
+        self.render_hotkey_status();
+        self.update_hud();
+        if let Some(error) = save_error.or(tray_error) {
+            self.notice(&error, true);
+        } else if persist {
+            self.notice("Language changed.", false);
+        }
+    }
     fn render_pro(&self, now: u64) {
         let Some(ui) = self.ui.upgrade() else { return };
         ui.set_cpu_trend_path(self.pro.cpu.path(now).into());
@@ -389,13 +477,13 @@ impl Controller {
         ui.set_session_gaming_ratio(self.pro.session.ratio());
         ui.set_session_donut_path(pro_view::donut_path(self.pro.session.ratio()).into());
         ui.set_session_accounting_label(self.pro.session.label().into());
-        ui.set_energy_savings("Unavailable · no energy meter".into());
+        ui.set_energy_savings(tr("Unavailable · no energy meter").into());
         ui.set_energy_savings_available(false);
     }
     fn send(&self, c: Command) {
         // A bounded queue keeps pipe backpressure and serialization off the UI.
         if let Err(e) = self.writer.try_send(c) {
-            self.notice(&format!("Engine command queue: {e}"), true);
+            self.notice(&trf("Engine command queue: {0}", &[&e.to_string()]), true);
         }
     }
     fn simple(&self, kind: u32) {
@@ -414,7 +502,7 @@ impl Controller {
     fn notice(&self, s: &str, error: bool) {
         *self.transient.borrow_mut() = Some((s.into(), error, Instant::now()));
         if let Some(ui) = self.ui.upgrade() {
-            ui.set_status(s.into());
+            ui.set_status(tr(s).into());
             ui.set_error(error);
         }
     }
@@ -551,7 +639,7 @@ impl Controller {
                 0,
                 Plan {
                     guid: String::new(),
-                    name: "Use global Gaming plan".into(),
+                    name: tr("Use global Gaming plan").into(),
                 },
             );
         }
@@ -615,18 +703,20 @@ impl Controller {
         ui.set_bulk_valid(!parsed.valid.is_empty());
         ui.set_bulk_error(!parsed.errors.is_empty());
         let message = if s.trim().is_empty() {
-            "Separate .exe names with commas. Paths are reduced to file names.".into()
+            tr("Separate .exe names with commas. Paths are reduced to file names.").into()
         } else {
-            format!(
-                "{} valid · {} duplicate · {} invalid{}",
-                parsed.valid.len(),
-                parsed.duplicates,
-                parsed.errors.len(),
-                parsed
-                    .errors
-                    .first()
-                    .map(|s| format!(" · {s}"))
-                    .unwrap_or_default()
+            trf(
+                "{0} valid · {1} duplicate · {2} invalid{3}",
+                &[
+                    &parsed.valid.len().to_string(),
+                    &parsed.duplicates.to_string(),
+                    &parsed.errors.len().to_string(),
+                    &parsed
+                        .errors
+                        .first()
+                        .map(|s| format!(" · {s}"))
+                        .unwrap_or_default(),
+                ],
             )
         };
         ui.set_validation(message.into());
@@ -731,7 +821,7 @@ impl Controller {
         ui.set_observer(s.observer);
         ui.set_suspended(s.suspended);
         ui.set_state_label(
-            if s.observer {
+            tr(if s.observer {
                 "Observer"
             } else if s.dry_run {
                 "Preview"
@@ -741,12 +831,12 @@ impl Controller {
                 "Connecting"
             } else {
                 "Paused"
-            }
+            })
             .into(),
         );
         ui.set_active_name(s.active_name.clone().into());
         ui.set_active_guid(s.active_guid.clone().into());
-        ui.set_status(s.status.clone().into());
+        ui.set_status(tr(&s.status).into());
         if let Some((text, error, at)) = self
             .transient
             .borrow()
@@ -754,10 +844,10 @@ impl Controller {
             .filter(|(_, _, at)| at.elapsed() < Duration::from_secs(8))
         {
             let _ = at;
-            ui.set_status(text.clone().into());
+            ui.set_status(tr(text).into());
             ui.set_error(*error);
         }
-        ui.set_telemetry(s.telemetry.clone().into());
+        ui.set_telemetry(tr(&s.telemetry).into());
         ui.set_cpu_warming(
             self.connected
                 && !s.suspended
@@ -769,9 +859,9 @@ impl Controller {
         ui.set_process_status_available(self.connected && s.monitoring && s.ready);
         ui.set_detector_label(pro_view::detector_label(s).into());
         ui.set_process_summary(if !s.monitoring {
-            "Monitoring paused".into()
+            tr("Monitoring paused").into()
         } else if s.running.is_empty() {
-            "No watched games running".into()
+            tr("No watched games running").into()
         } else {
             s.running.join(", ").into()
         });
@@ -794,7 +884,7 @@ impl Controller {
                     .iter()
                     .find(|p| p.guid.eq_ignore_ascii_case(guid))
                     .map(|p| p.name.clone())
-                    .unwrap_or_else(|| "Missing plan — select another".into())
+                    .unwrap_or_else(|| tr("Missing plan — select another").into())
             };
             ui.set_gaming_name(name(&c.gaming).into());
             ui.set_default_name(name(&c.default_plan).into());
@@ -855,10 +945,10 @@ impl Controller {
         self.render_sensors();
         if let Some(reason) = &self.connection_error {
             ui.set_cpu_switch_path("".into());
-            ui.set_cpu_trend_label("CPU graph unavailable · engine disconnected".into());
-            ui.set_detector_label("Windows process detector · engine disconnected".into());
+            ui.set_cpu_trend_label(tr("CPU graph unavailable · engine disconnected").into());
+            ui.set_detector_label(tr("Windows process detector · engine disconnected").into());
             ui.set_error(true);
-            ui.set_status(format!("Engine disconnected: {reason}").into());
+            ui.set_status(trf("Engine disconnected: {0}", &[reason]).into());
             invalidate_cpu_display(&ui, &self.models.cores, "engine disconnected");
         }
         if self.games_dirty {
@@ -897,7 +987,7 @@ impl Controller {
             "discover" => {
                 self.running_candidates = None;
                 ui.set_candidate_source(
-                    "Installed game libraries · choose a reviewed executable".into(),
+                    tr("Installed game libraries · choose a reviewed executable").into(),
                 );
                 self.candidate_query.clear();
                 self.candidate_page = 0;
@@ -1112,6 +1202,20 @@ pub fn run(
         .map_err(|error| error.to_string())?;
     let ui = AppWindow::new().map_err(|e| e.to_string())?;
     let preferences = crate::preferences::Preferences::load();
+    let preview_language = std::env::var("GPPS_PREVIEW_LANGUAGE").ok();
+    let requested_language =
+        localization::preview_request(&preferences.language, dry, preview_language.as_deref());
+    let language_error = localization::select(requested_language).err();
+    ui.set_language_index(if language_error.is_some() {
+        1
+    } else {
+        localization::index(requested_language)
+    });
+    ui.set_language_names(slint::ModelRc::new(VecModel::from(localization::names())));
+    ui.set_rtl(localization::is_rtl());
+    ui.set_language_results(slint::ModelRc::new(VecModel::from(localization::filter(
+        "",
+    ))));
     let topology = crate::system_integration::cpu_topology();
     let mut pro = ProView::default();
     pro.cpu.set_topology(&topology);
@@ -1153,6 +1257,7 @@ pub fn run(
         session_started: Instant::now(),
         preferences,
         integration: None,
+        hotkey_presentation: RefCell::new(None),
         sensor_request,
         sensor_stop: sensor_stop.clone(),
         running_candidates: None,
@@ -1196,7 +1301,10 @@ pub fn run(
                     control.show_window();
                     if let Some(integration) = &control.integration {
                         if let Err(error) = integration.notify_already_running() {
-                            control.notice(&format!("Already running; tray notice: {error}"), true);
+                            control.notice(
+                                &trf("Already running; tray notice: {0}", &[&error.to_string()]),
+                                true,
+                            );
                         }
                     }
                 }
@@ -1205,6 +1313,21 @@ pub fn run(
         .map_err(|e| e.to_string())
     })?;
     install_pro(&ui, &control, sensor_requests, sensor_stop);
+    if let Some(error) = language_error {
+        control
+            .borrow()
+            .notice(&trf("Language selection failed: {0}", &[&error]), true);
+    }
+    let c = control.clone();
+    ui.on_language_changed(move |index| c.borrow_mut().language_changed(index));
+    let weak = ui.as_weak();
+    ui.on_language_filter(move |query| {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_language_results(slint::ModelRc::new(VecModel::from(localization::filter(
+                &query,
+            ))));
+        }
+    });
     let c = control.clone();
     ui.on_action(move |a| c.borrow_mut().action(&a));
     let c = control.clone();
@@ -1243,7 +1366,7 @@ pub fn run(
         if i == -1 && c.ui.upgrade().is_some_and(|u| u.get_plan_kind() == 2) {
             c.edit_plan.clear();
             if let Some(ui) = c.ui.upgrade() {
-                ui.set_game_plan_name("Use global Gaming plan".into());
+                ui.set_game_plan_name(tr("Use global Gaming plan").into());
                 ui.set_plan_kind(-1);
                 ui.set_modal(3);
             }
@@ -1371,7 +1494,7 @@ pub fn run(
                 }
                 thread::sleep(Duration::from_millis(100));
             }
-            Err("The native engine did not start. See native-startup-error.txt.".into())
+            Err(tr("The native engine did not start. See native-startup-error.txt.").into())
         })();
         let result = (|| -> Result<(), String> {
             let mut read = connection?;
@@ -1458,7 +1581,12 @@ pub fn run(
     let v = view.clone();
     ui.window().on_winit_window_event(move |_, event| {
         match event {
-            winit::event::WindowEvent::Focused(focused) => v.focused.set(*focused),
+            winit::event::WindowEvent::Focused(focused) => {
+                v.focused.set(*focused);
+                if *focused {
+                    schedule_system_language_refresh();
+                }
+            }
             winit::event::WindowEvent::Occluded(occluded) => v.occluded.set(*occluded),
             winit::event::WindowEvent::Resized(_) => {}
             _ => return slint::winit_030::EventResult::Propagate,

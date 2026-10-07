@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    /// Interface choice only. Engine policy and native Windows plan names are
+    /// independent of this per-user appearance setting.
+    #[serde(deserialize_with = "deserialize_language")]
+    pub language: String,
     pub compact: bool,
     pub dark: bool,
     pub sync_theme: bool,
@@ -22,6 +26,7 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            language: "system".into(),
             compact: true,
             dark: true,
             sync_theme: true,
@@ -39,6 +44,13 @@ impl Default for Preferences {
     }
 }
 
+fn deserialize_language<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    Ok(crate::localization::normalize(&value).into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -53,6 +65,23 @@ mod tests {
         let saved: Preferences =
             serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
         assert!(!saved.compact);
+    }
+
+    #[test]
+    fn language_migrates_old_preferences_and_round_trips_the_override() {
+        let old: Preferences =
+            serde_json::from_str(r#"{"compact":false,"hotkey":"Ctrl + Alt + P"}"#).unwrap();
+        assert_eq!(old.language, "system");
+        assert!(!old.compact);
+        let selected: Preferences =
+            serde_json::from_str(r#"{"language":"pt_BR","compact":false}"#).unwrap();
+        assert_eq!(selected.language, "pt-BR");
+        let roundtrip: Preferences =
+            serde_json::from_slice(&serde_json::to_vec(&selected).unwrap()).unwrap();
+        assert_eq!(roundtrip.language, "pt-BR");
+        assert!(!roundtrip.compact);
+        let unknown: Preferences = serde_json::from_str(r#"{"language":"unavailable"}"#).unwrap();
+        assert_eq!(unknown.language, "en");
     }
 }
 impl Preferences {

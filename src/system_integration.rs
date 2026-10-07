@@ -22,6 +22,7 @@ pub enum SystemEvent {
     Exit,
     ToggleOverlay,
     ThemeChanged(bool),
+    DisplayLanguageChanged,
     Error(String),
 }
 type EventCallback = Box<dyn Fn(SystemEvent) + Send + Sync + 'static>;
@@ -62,6 +63,12 @@ unsafe extern "C" {
     ) -> *mut c_void;
     fn nn6_pro_close(context: *mut c_void);
     fn nn6_pro_tray(context: *mut c_void, enabled: bool, monitoring: bool) -> u32;
+    fn nn6_pro_tray_language(
+        context: *mut c_void,
+        labels: *const u16,
+        count: u32,
+        capacity: u32,
+    ) -> u32;
     fn nn6_pro_notify_already_running(context: *mut c_void) -> u32;
     fn nn6_pro_hotkeys(
         context: *mut c_void,
@@ -93,6 +100,29 @@ unsafe extern "C" {
 }
 fn wide_text(value: &[u16]) -> String {
     String::from_utf16_lossy(&value[..value.iter().position(|&c| c == 0).unwrap_or(value.len())])
+}
+
+const TRAY_LABEL_COUNT: usize = 7;
+const TRAY_LABEL_CAPACITY: usize = 256;
+fn pack_tray_labels(
+    labels: &[String; TRAY_LABEL_COUNT],
+) -> Result<[[u16; TRAY_LABEL_CAPACITY]; TRAY_LABEL_COUNT], String> {
+    let mut packed = [[0u16; TRAY_LABEL_CAPACITY]; TRAY_LABEL_COUNT];
+    for (row, label) in labels.iter().enumerate() {
+        if label.is_empty() || label.chars().any(char::is_control) {
+            return Err("Tray captions must be nonempty and contain no control characters.".into());
+        }
+        // Win32 menus interpret a single ampersand as a mnemonic. Escape it so
+        // translated copy remains literal and cannot invent keyboard commands.
+        let escaped = label.replace('&', "&&");
+        for (column, code_unit) in escaped.encode_utf16().enumerate() {
+            if column >= TRAY_LABEL_CAPACITY - 1 {
+                return Err("Tray caption exceeds its UTF-16 buffer.".into());
+            }
+            packed[row][column] = code_unit;
+        }
+    }
+    Ok(packed)
 }
 fn error(code: u32, operation: &str) -> String {
     if code == 0x8004100e {
@@ -126,6 +156,7 @@ extern "C" fn system_callback(context: *mut c_void, event: u32, value: u32) {
         7 => SystemEvent::ThemeChanged(value != 0),
         8 => SystemEvent::Error(error(value, "Windows tray")),
         9 => SystemEvent::TogglePlan,
+        10 => SystemEvent::DisplayLanguageChanged,
         _ => return,
     };
     // Never unwind through a C callback. Release builds also use panic=abort.
@@ -166,6 +197,32 @@ impl SystemIntegration {
         checked(
             unsafe { nn6_pro_tray(self.context, enabled, monitoring) },
             "Configure tray",
+        )
+    }
+    /// Copy localized captions to fixed native storage synchronously. This only
+    /// changes presentation: numeric menu commands and callbacks remain stable.
+    pub fn set_tray_language(&self) -> Result<(), String> {
+        let labels = [
+            "Overview",
+            "Gaming plan",
+            "Default plan",
+            "Choose a power plan",
+            "Pause monitoring",
+            "Resume monitoring",
+            "Exit & restore Default",
+        ]
+        .map(crate::localization::tr);
+        let packed = pack_tray_labels(&labels)?;
+        checked(
+            unsafe {
+                nn6_pro_tray_language(
+                    self.context,
+                    packed.as_ptr().cast(),
+                    TRAY_LABEL_COUNT as u32,
+                    TRAY_LABEL_CAPACITY as u32,
+                )
+            },
+            "Update tray language",
         )
     }
     /// Request a quiet, real-time notice after a duplicate GUI launch. This
@@ -554,6 +611,43 @@ pub fn probe() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tray_captions_pack_utf16_without_reinterpreting_mnemonics() {
+        let labels = [
+            "العربية",
+            "简体中文",
+            "Русский",
+            "Default",
+            "Pause",
+            "Resume",
+            "Exit & restore",
+        ]
+        .map(str::to_owned);
+        let packed = pack_tray_labels(&labels).unwrap();
+        assert_eq!(wide_text(&packed[0]), "العربية");
+        assert_eq!(wide_text(&packed[1]), "简体中文");
+        assert_eq!(wide_text(&packed[6]), "Exit && restore");
+        assert!(packed.iter().all(|row| row[255] == 0));
+    }
+
+    #[test]
+    fn tray_captions_reject_controls_and_overflow_before_native_delivery() {
+        let mut labels = std::array::from_fn(|_| "x".to_owned());
+        for invalid in [
+            String::new(),
+            "bad\0caption".into(),
+            "bad\ncaption".into(),
+            "x".repeat(256),
+            "&".repeat(128),
+            "🕹".repeat(128),
+        ] {
+            labels[3] = invalid;
+            assert!(pack_tray_labels(&labels).is_err());
+        }
+        labels[3] = "x".repeat(255);
+        assert!(pack_tray_labels(&labels).is_ok());
+    }
+
     #[test]
     fn elevated_broker_rejects_unrelated_commands_without_launching() {
         let guid = "381b4222-f694-41f0-9685-ff5bb260df2e";
