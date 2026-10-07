@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.3.7 — 2026-10-07
+## 2.3.7 - 2026-10-07
 
 ### Automatic language support
 
